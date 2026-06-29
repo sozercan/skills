@@ -104,7 +104,7 @@ kindctl_sanitize_slug() {
 }
 
 kindctl_hash6() {
-  printf '%s' "$1" | shasum -a 256 | cut -c1-6
+  python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:6])' "$1"
 }
 
 kindctl_find_kind_marker_or_pwd() {
@@ -147,7 +147,7 @@ kindctl_normalize_tag() {
 }
 
 # Sets KINDCTL_ROOT, KINDCTL_HASH, KINDCTL_TAG, KINDCTL_BASE, KINDCTL_NAME,
-# KINDCTL_CONTEXT, KINDCTL_KUBECONFIG, KINDCTL_STORE_DIR, KINDCTL_REGISTRY.
+# KINDCTL_CONTEXT, KINDCTL_KUBECONFIG, KINDCTL_STORE_DIR.
 
 kindctl_derive_name_for_root_tag() {
   local root raw_tag hash tag suffix base_cap raw_base base
@@ -167,7 +167,7 @@ kindctl_derive_name_for_root_tag() {
 }
 
 kindctl_derive() {
-  local raw_tag suffix base_cap raw_base base tag
+  local raw_tag suffix tag
   raw_tag="${1:-}"
   KINDCTL_ROOT="$(kindctl_workspace_root)"
   KINDCTL_HASH="$(kindctl_hash6 "$KINDCTL_ROOT")"
@@ -175,15 +175,13 @@ kindctl_derive() {
     kindctl_die "--tag must contain at least one [a-z0-9] character after sanitization"
   fi
   KINDCTL_TAG="$tag"
+  if ! KINDCTL_NAME="$(kindctl_derive_name_for_root_tag "$KINDCTL_ROOT" "$raw_tag")"; then
+    kindctl_die "--tag must contain at least one [a-z0-9] character after sanitization"
+  fi
   suffix="-${KINDCTL_HASH}"
   [ -n "$KINDCTL_TAG" ] && suffix="${suffix}-${KINDCTL_TAG}"
-  base_cap=$((50 - ${#suffix}))
-  [ "$base_cap" -gt 40 ] && base_cap=40
-  raw_base="$(basename "$KINDCTL_ROOT")"
-  base="$(kindctl_sanitize_slug "$raw_base" | cut -c1-"$base_cap")"
-  [ -n "$base" ] || base="repo"
-  KINDCTL_BASE="$base"
-  KINDCTL_NAME="${KINDCTL_BASE}${suffix}"
+  # shellcheck disable=SC2034 # exported contract for sourced/debug use
+  KINDCTL_BASE="${KINDCTL_NAME%"$suffix"}"
   KINDCTL_CONTEXT="kind-${KINDCTL_NAME}"
   KINDCTL_STORE_DIR="$(kindctl_store)"
   KINDCTL_KUBECONFIG="${KINDCTL_STORE_DIR}/${KINDCTL_NAME}.kubeconfig"
@@ -387,6 +385,29 @@ sys.exit(0 if entry and entry.get("managed") is True else 1)
 PY
 }
 
+kindctl_registry_is_owned_for_root_tag() {
+  local name root tag reg
+  name="$1"; root="$2"; tag="${3:-}"
+  kindctl_preflight_core
+  kindctl_registry_init_unlocked
+  reg="$(kindctl_registry_path)"
+  KINDCTL_REGISTRY="$reg" KINDCTL_NAME="$name" KINDCTL_ROOT="$root" KINDCTL_TAG="$tag" python3 - <<'PY'
+import json, os, sys
+try:
+    data = json.load(open(os.environ["KINDCTL_REGISTRY"]))
+except FileNotFoundError:
+    sys.exit(1)
+entry = data.get("clusters", {}).get(os.environ["KINDCTL_NAME"])
+if not entry or entry.get("managed") is not True:
+    sys.exit(1)
+if entry.get("root", "") != os.environ["KINDCTL_ROOT"]:
+    sys.exit(1)
+if entry.get("tag", "") != os.environ.get("KINDCTL_TAG", ""):
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
 kindctl_registry_get_context() {
   local name reg
   name="$1"
@@ -437,8 +458,8 @@ kindctl_cluster_live() {
 kindctl_require_owned_cluster() {
   local name kubeconfig
   name="$1"; kubeconfig="$2"
-  if ! kindctl_registry_is_owned "$name"; then
-    kindctl_die "cluster is missing or not registry-owned: $name; run: kindctl create or kindctl doctor"
+  if ! kindctl_registry_is_owned_for_root_tag "$name" "$KINDCTL_ROOT" "$KINDCTL_TAG"; then
+    kindctl_die "cluster is missing, not registry-owned, or belongs to a different workspace/tag: $name; run: kindctl create or kindctl doctor"
   fi
   if ! kindctl_cluster_live "$name"; then
     kindctl_die "cluster does not exist according to kind: $name; run: kindctl create or kindctl doctor"
@@ -559,6 +580,9 @@ kindctl_cmd_delete() {
   done
   kindctl_preflight_kind
   kindctl_derive "$raw_tag"
+  if ! kindctl_registry_is_owned_for_root_tag "$KINDCTL_NAME" "$KINDCTL_ROOT" "$KINDCTL_TAG"; then
+    kindctl_die "refusing to delete non-registry-owned cluster or cluster registered for a different workspace/tag: $KINDCTL_NAME; run kindctl doctor if recovering registry"
+  fi
   context="$(kindctl_registry_get_context "$KINDCTL_NAME")"
   [ -n "$context" ] || context="$KINDCTL_CONTEXT"
   kindctl_cmd_delete_one "$KINDCTL_NAME" "$KINDCTL_KUBECONFIG" "$context"

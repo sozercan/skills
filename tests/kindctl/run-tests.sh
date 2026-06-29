@@ -251,7 +251,13 @@ test_derivation_tag_validation_and_length() {
   mkdir -p "$TEST_TMP/repo"; cd "$TEST_TMP/repo"
   if kindctl_normalize_tag "!!!!" >/dev/null 2>&1; then fail_msg "symbol-only tag should fail"; fi
   long="This_IS_A_Very_Long_Tag_With_Symbols_And_Uppercase"
+  cat > "$TEST_TMP/bin/shasum" <<'SHASUM'
+#!/usr/bin/env bash
+exit 127
+SHASUM
+  chmod +x "$TEST_TMP/bin/shasum"
   kindctl_derive "$long"
+  assert_eq "$KINDCTL_NAME" "$(kindctl_derive_name_for_root_tag "$KINDCTL_ROOT" "$long")"
   [ "${#KINDCTL_TAG}" -le 16 ] || fail_msg "tag too long: $KINDCTL_TAG"
   [ "${#KINDCTL_NAME}" -le 50 ] || fail_msg "name too long: $KINDCTL_NAME"
   container_name="${KINDCTL_NAME}-control-plane"
@@ -267,6 +273,30 @@ test_registry_modes_and_ownership() {
   if kindctl_registry_is_owned missing; then fail_msg "missing entry should not be owned"; fi
   kindctl_registry_upsert "u" "$TEST_TMP/repo" "$HOME/.kube/kind/u.kubeconfig" "kind-u" "" ready false
   if kindctl_registry_is_owned u; then fail_msg "unmanaged entry should not be owned"; fi
+}
+
+test_current_commands_refuse_registry_root_collision() {
+  setup_fake_env; source_kindctl
+  repo="$TEST_TMP/repo"; other="$TEST_TMP/other"; mkdir -p "$repo" "$other"
+  cd "$repo"; kindctl_derive ""
+  name="$KINDCTL_NAME"; kubeconfig="$KINDCTL_KUBECONFIG"; context="$KINDCTL_CONTEXT"
+  mkdir -p "$FAKE_STATE/clusters" "$FAKE_STATE/containers" "$FAKE_STATE/running" "$(dirname "$kubeconfig")"
+  touch "$FAKE_STATE/clusters/$name" "$FAKE_STATE/containers/$name-id" "$FAKE_STATE/running/$name-id"
+  printf 'apiVersion: v1
+current-context: %s
+' "$context" > "$kubeconfig"
+  kindctl_registry_upsert "$name" "$other" "$kubeconfig" "$context" "" ready true
+
+  if "$KINDCTL" path >"$TEST_TMP/out" 2>"$TEST_TMP/err"; then
+    fail_msg "path should refuse registry entry owned by another root"
+  fi
+  assert_contains "$(cat "$TEST_TMP/err")" "different workspace/tag"
+  if "$KINDCTL" delete >"$TEST_TMP/out" 2>"$TEST_TMP/err"; then
+    fail_msg "delete should refuse registry entry owned by another root"
+  fi
+  assert_contains "$(cat "$TEST_TMP/err")" "different workspace/tag"
+  assert_file_exists "$FAKE_STATE/clusters/$name"
+  assert_eq "$(json_has_cluster "$HOME/.kube/kind/registry.json" "$name")" yes
 }
 
 test_registry_concurrent_writes_preserve_entries() {
@@ -354,8 +384,8 @@ test_env_output_escapes_apostrophes() {
   env_out="$(KINDCTL_STORE="$store" "$KINDCTL" env --tag q)"
   unset KUBECONFIG
   eval "$env_out"
-  assert_contains "$KUBECONFIG" "with'apostrophe"
-  assert_file_exists "$KUBECONFIG"
+  assert_contains "${KUBECONFIG:-}" "with'apostrophe"
+  assert_file_exists "${KUBECONFIG:-}"
 }
 
 test_safety_strict_missing_for_cluster_targeting_commands() {
