@@ -86,6 +86,9 @@ jobs:
               echo "Refusing to automerge PR #$pr_number: PR head repo $pr_head_repo does not match workflow repo $HEAD_REPOSITORY." >&2
               exit 1
             fi
+          else
+            echo "Manual dispatch: waiting for PR #$pr_number checks to pass before merge."
+            gh pr checks "$pr_number" --repo "$REPO" --watch --fail-fast
           fi
 
           echo "Approving Dependabot PR #$pr_number after successful CI."

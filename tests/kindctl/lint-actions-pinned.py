@@ -10,6 +10,7 @@ HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+DOCKER_DIGEST_RE = re.compile(r"^docker://[^@]+@sha256:[0-9a-fA-F]{64}$")
 USES_RE = re.compile(r"^\s*uses:\s*([^\s#]+)")
 
 errors: list[str] = []
@@ -22,7 +23,8 @@ for path in sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml")):
         if ref.startswith("./"):
             continue
         if ref.startswith("docker://"):
-            errors.append(f"{path}:{lineno}: docker actions must be digest-pinned: {ref}")
+            if not DOCKER_DIGEST_RE.fullmatch(ref):
+                errors.append(f"{path}:{lineno}: docker action is not digest-pinned with @sha256:<digest>: {ref}")
             continue
         if "@" not in ref:
             errors.append(f"{path}:{lineno}: action is missing @sha: {ref}")

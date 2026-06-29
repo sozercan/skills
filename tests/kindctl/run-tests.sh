@@ -45,6 +45,15 @@ print(cur if not isinstance(cur, bool) else str(cur).lower())
 PY
 }
 
+state_names() {
+  local dir="$1" path
+  [ -d "$dir" ] || return 0
+  for path in "$dir"/*; do
+    [ -e "$path" ] || continue
+    basename "$path"
+  done | sort
+}
+
 json_has_cluster() {
   local file="$1" name="$2"
   python3 - "$file" "$name" <<'PY'
@@ -69,7 +78,10 @@ case "$cmd" in
       echo "provider unavailable" >&2
       exit 42
     fi
-    find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print 2>/dev/null | sed 's|.*/||' | sort
+    for path in "$FAKE_STATE/clusters"/*; do
+      [ -e "$path" ] || continue
+      basename "$path"
+    done | sort
     ;;
   "create cluster")
     name=""; kubeconfig=""
@@ -147,7 +159,7 @@ case "$cmd" in
     done
     names=""
     if [ "$label" = "__any__" ] || [ -z "$label" ]; then
-      names="$(find "$FAKE_STATE/containers" -type f -maxdepth 1 -print 2>/dev/null | sed 's|.*/||; s/-id$//' | sort || true)"
+      names="$(for path in "$FAKE_STATE/containers"/*; do [ -e "$path" ] || continue; basename "$path" | sed 's/-id$//'; done | sort || true)"
     else
       [ -e "$FAKE_STATE/containers/$label-id" ] && names="$label" || names=""
     fi
@@ -283,7 +295,7 @@ SH
   chmod +x "$repo/.kind/setup.sh"
   cd "$repo"
   "$KINDCTL" create --tag dev >/tmp/kindctl-create.out
-  name="$(find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print | sed 's|.*/||')"
+  name="$(state_names "$FAKE_STATE/clusters")"
   assert_file_exists "$HOME/.kube/kind/$name.kubeconfig"
   assert_eq "$(json_get "$HOME/.kube/kind/registry.json" "clusters.$name.setup_status")" ready
   assert_contains "$(cat "$repo/setup.env")" "$HOME/.kube/kind/$name.kubeconfig"
@@ -303,7 +315,7 @@ SH
   chmod +x "$repo/.kind/setup.sh"
   cd "$repo"
   if "$KINDCTL" create 2>"$TEST_TMP/err"; then fail_msg "create should fail when hook fails"; fi
-  name="$(find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print | sed 's|.*/||')"
+  name="$(state_names "$FAKE_STATE/clusters")"
   assert_eq "$(json_get "$HOME/.kube/kind/registry.json" "clusters.$name.setup_status")" failed
   assert_contains "$(cat "$TEST_TMP/err")" "setup hook failed"
 }
@@ -313,7 +325,7 @@ test_lifecycle_delete_owned_and_refuse_unowned() {
   if "$KINDCTL" delete 2>"$TEST_TMP/err"; then fail_msg "delete should refuse unowned cluster"; fi
   assert_contains "$(cat "$TEST_TMP/err")" "non-registry-owned"
   "$KINDCTL" create >/dev/null
-  name="$(find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print | sed 's|.*/||')"
+  name="$(state_names "$FAKE_STATE/clusters")"
   "$KINDCTL" delete >/dev/null
   assert_not_exists "$FAKE_STATE/clusters/$name"
   assert_eq "$(json_has_cluster "$HOME/.kube/kind/registry.json" "$name")" no
@@ -370,7 +382,7 @@ test_safety_strict_missing_for_cluster_targeting_commands() {
 test_operate_load_hibernate_resume_and_list() {
   setup_fake_env; repo="$TEST_TMP/repo"; mkdir -p "$repo"; cd "$repo"
   "$KINDCTL" create --tag op >/dev/null
-  name="$(find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print | sed 's|.*/||')"
+  name="$(state_names "$FAKE_STATE/clusters")"
   "$KINDCTL" load --tag op image:dev
   "$KINDCTL" hibernate --tag op >/dev/null
   "$KINDCTL" resume --tag op >/dev/null
@@ -395,7 +407,7 @@ test_operate_list_all_marks_unmanaged() {
 test_operate_nuke_and_prune_never_delete_unmanaged() {
   setup_fake_env; repo="$TEST_TMP/repo"; mkdir -p "$repo"; cd "$repo"
   "$KINDCTL" create --tag keep >/dev/null
-  owned="$(find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print | sed 's|.*/||')"
+  owned="$(state_names "$FAKE_STATE/clusters")"
   touch "$FAKE_STATE/clusters/unmanaged" "$FAKE_STATE/containers/unmanaged-id" "$FAKE_STATE/running/unmanaged-id"
   printf 'no\n' | "$KINDCTL" nuke >/dev/null 2>&1
   assert_file_exists "$FAKE_STATE/clusters/$owned"
@@ -404,7 +416,7 @@ test_operate_nuke_and_prune_never_delete_unmanaged() {
   assert_file_exists "$FAKE_STATE/clusters/unmanaged"
 
   "$KINDCTL" create --tag dead >/dev/null
-  dead_name="$(find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print | sed 's|.*/||' | grep -- '-dead$')"
+  dead_name="$(state_names "$FAKE_STATE/clusters" | grep -- '-dead$')"
   dead_kube="$HOME/.kube/kind/$dead_name.kubeconfig"
   rm -f "$FAKE_STATE/clusters/$dead_name" "$FAKE_STATE/containers/$dead_name-id" "$FAKE_STATE/running/$dead_name-id"
   "$KINDCTL" prune --dead --yes >/dev/null
@@ -416,7 +428,7 @@ test_operate_nuke_and_prune_never_delete_unmanaged() {
 test_prune_dead_refuses_when_kind_cluster_listing_fails() {
   setup_fake_env; repo="$TEST_TMP/repo"; mkdir -p "$repo"; cd "$repo"
   "$KINDCTL" create --tag dead >/dev/null
-  dead_name="$(find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print | sed 's|.*/||' | grep -- '-dead$')"
+  dead_name="$(state_names "$FAKE_STATE/clusters" | grep -- '-dead$')"
   dead_kube="$HOME/.kube/kind/$dead_name.kubeconfig"
   if FAKE_KIND_GET_CLUSTERS_FAIL=1 "$KINDCTL" prune --dead --yes >"$TEST_TMP/out" 2>"$TEST_TMP/err"; then
     fail_msg "prune --dead should fail when kind get clusters fails"

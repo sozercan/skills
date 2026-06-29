@@ -104,7 +104,7 @@ jobs:
             : > "$before"
           fi
 
-          KINDCTL_INTEGRATION_REQUIRE=1 make kindctl-test-integration
+          KINDCTL_INTEGRATION_REQUIRE=1 KINDCTL_INTEGRATION_K8S_VERSION="${KUBERNETES_VERSION}" make kindctl-test-integration
 
           if [ -f "$HOME/.kube/config" ]; then
             cp "$HOME/.kube/config" "$after"
