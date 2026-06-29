@@ -65,6 +65,10 @@ cmd="${1:-} ${2:-}"
 shift $(( $# >= 2 ? 2 : $# ))
 case "$cmd" in
   "get clusters")
+    if [ "${FAKE_KIND_GET_CLUSTERS_FAIL:-}" = "1" ]; then
+      echo "provider unavailable" >&2
+      exit 42
+    fi
     find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print 2>/dev/null | sed 's|.*/||' | sort
     ;;
   "create cluster")
@@ -331,6 +335,17 @@ test_safety_path_exec_kubectl_scoped() {
   assert_contains "$(cat "$FAKE_LOG")" "kubectl KUBECONFIG=$path [get] [nodes]"
 }
 
+test_env_output_escapes_apostrophes() {
+  setup_fake_env; repo="$TEST_TMP/repo"; mkdir -p "$repo"; cd "$repo"
+  store="$TEST_TMP/home/with'apostrophe/kind"
+  KINDCTL_STORE="$store" "$KINDCTL" create --tag q >/dev/null
+  env_out="$(KINDCTL_STORE="$store" "$KINDCTL" env --tag q)"
+  unset KUBECONFIG
+  eval "$env_out"
+  assert_contains "$KUBECONFIG" "with'apostrophe"
+  assert_file_exists "$KUBECONFIG"
+}
+
 test_safety_strict_missing_for_cluster_targeting_commands() {
   setup_fake_env; repo="$TEST_TMP/repo"; mkdir -p "$repo"; cd "$repo"
   commands=(
@@ -398,6 +413,19 @@ test_operate_nuke_and_prune_never_delete_unmanaged() {
   assert_file_exists "$FAKE_STATE/clusters/unmanaged"
 }
 
+test_prune_dead_refuses_when_kind_cluster_listing_fails() {
+  setup_fake_env; repo="$TEST_TMP/repo"; mkdir -p "$repo"; cd "$repo"
+  "$KINDCTL" create --tag dead >/dev/null
+  dead_name="$(find "$FAKE_STATE/clusters" -type f -maxdepth 1 -print | sed 's|.*/||' | grep -- '-dead$')"
+  dead_kube="$HOME/.kube/kind/$dead_name.kubeconfig"
+  if FAKE_KIND_GET_CLUSTERS_FAIL=1 "$KINDCTL" prune --dead --yes >"$TEST_TMP/out" 2>"$TEST_TMP/err"; then
+    fail_msg "prune --dead should fail when kind get clusters fails"
+  fi
+  assert_contains "$(cat "$TEST_TMP/err")" "provider unavailable"
+  assert_eq "$(json_has_cluster "$HOME/.kube/kind/registry.json" "$dead_name")" yes
+  assert_file_exists "$dead_kube"
+}
+
 test_doctor_regenerates_kubeconfig_and_does_not_adopt_arbitrary() {
   setup_fake_env; source_kindctl
   repo="$TEST_TMP/repo"; mkdir -p "$repo"; cd "$repo"; kindctl_derive ""
@@ -429,6 +457,21 @@ test_doctor_reregisters_current_exact_and_reports_name_drift() {
   kindctl_registry_upsert wrong-name "$repo" "$HOME/.kube/kind/wrong.kubeconfig" kind-wrong-name "" ready true
   out="$($KINDCTL doctor)"
   assert_contains "$out" "name-drift: wrong-name"
+}
+
+test_doctor_reregisters_tagged_workspace_cluster() {
+  setup_fake_env; source_kindctl
+  repo="$TEST_TMP/repo"; mkdir -p "$repo"; cd "$repo"; kindctl_derive "e2e"
+  tagged_name="$KINDCTL_NAME"
+  tagged_kube="$KINDCTL_KUBECONFIG"
+  mkdir -p "$FAKE_STATE/clusters" "$FAKE_STATE/containers" "$FAKE_STATE/running"
+  touch "$FAKE_STATE/clusters/$tagged_name" "$FAKE_STATE/containers/$tagged_name-id" "$FAKE_STATE/running/$tagged_name-id"
+  rm -f "$HOME/.kube/kind/registry.json" "$tagged_kube"
+  out="$($KINDCTL doctor)"
+  assert_contains "$out" "re-register current workspace: $tagged_name"
+  kindctl_registry_is_owned "$tagged_name"
+  assert_eq "$($KINDCTL path --tag e2e)" "$tagged_kube"
+  assert_file_exists "$tagged_kube"
 }
 
 test_doctor_missing_tool_preflight_is_clear() {

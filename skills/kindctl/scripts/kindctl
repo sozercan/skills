@@ -69,7 +69,7 @@ kindctl_registry_path() {
 
 kindctl_shell_quote() {
   # Single-quote for POSIX shells.
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\''/g")"
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
 kindctl_require_command() {
@@ -204,7 +204,14 @@ kindctl_registry_init_unlocked() {
     tmp="${reg}.$$.$RANDOM.tmp"
     printf '{"version":1,"clusters":{}}\n' > "$tmp"
     chmod 600 "$tmp" 2>/dev/null || true
-    mv "$tmp" "$reg"
+    # Atomic no-clobber create: unlocked readers may initialize the registry,
+    # but a late initializer must never overwrite entries written by another process.
+    if ! ln "$tmp" "$reg" 2>/dev/null; then
+      rm -f -- "$tmp"
+      [ -f "$reg" ] || kindctl_die "failed to initialize registry: $reg"
+    else
+      rm -f -- "$tmp"
+    fi
   fi
   chmod 600 "$reg" 2>/dev/null || true
 }
@@ -218,14 +225,15 @@ kindctl_release_lock() {
 }
 
 kindctl_acquire_lock() {
-  local store lock attempts
+  local store lock attempts max_attempts
   kindctl_ensure_store_dir
   store="$(kindctl_store)"
   lock="$store/.lock"
   attempts=0
+  max_attempts="${KINDCTL_LOCK_ATTEMPTS:-1200}"
   while ! mkdir "$lock" 2>/dev/null; do
     attempts=$((attempts + 1))
-    if [ "$attempts" -ge "100" ]; then
+    if [ "$attempts" -ge "$max_attempts" ]; then
       kindctl_die "timed out waiting for registry lock: $lock"
     fi
     sleep 0.05
@@ -644,7 +652,7 @@ kindctl_cmd_hibernate_resume() {
 }
 
 kindctl_kind_clusters() {
-  kind get clusters 2>/dev/null || true
+  kind get clusters
 }
 
 kindctl_docker_cluster_status() {
@@ -891,18 +899,34 @@ kindctl_cmd_doctor() {
 $(kindctl_registry_tsv)
 EOF_REGISTRY
 
-  # Opportunistically re-register current workspace's exact derived live cluster.
+  # Opportunistically re-register live clusters derived from the current workspace,
+  # including tagged clusters whose registry entries were lost.
   kindctl_derive ""
-  if kindctl_line_in_text "$KINDCTL_NAME" "$live"; then
-    if ! kindctl_registry_is_owned "$KINDCTL_NAME"; then
-      printf 're-register current workspace: %s\n' "$KINDCTL_NAME"
-      kindctl_registry_upsert "$KINDCTL_NAME" "$KINDCTL_ROOT" "$KINDCTL_KUBECONFIG" "$KINDCTL_CONTEXT" "$KINDCTL_TAG" ready true
-      if [ ! -s "$KINDCTL_KUBECONFIG" ]; then
-        kind export kubeconfig --name "$KINDCTL_NAME" --kubeconfig "$KINDCTL_KUBECONFIG"
-        chmod 600 "$KINDCTL_KUBECONFIG" 2>/dev/null || true
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    recover_tag=""
+    expected_name=""
+    if [ "$name" = "$KINDCTL_NAME" ]; then
+      recover_tag="$KINDCTL_TAG"
+      expected_name="$KINDCTL_NAME"
+    elif [ "${name#*-"$KINDCTL_HASH"-}" != "$name" ]; then
+      recover_tag="${name##*-"$KINDCTL_HASH"-}"
+      expected_name="$(kindctl_derive_name_for_root_tag "$KINDCTL_ROOT" "$recover_tag" || true)"
+    fi
+    [ -n "$expected_name" ] || continue
+    [ "$expected_name" = "$name" ] || continue
+    if ! kindctl_registry_is_owned "$name"; then
+      recover_kubeconfig="$(kindctl_store)/${name}.kubeconfig"
+      printf 're-register current workspace: %s\n' "$name"
+      kindctl_registry_upsert "$name" "$KINDCTL_ROOT" "$recover_kubeconfig" "kind-${name}" "$recover_tag" ready true
+      if [ ! -s "$recover_kubeconfig" ]; then
+        kind export kubeconfig --name "$name" --kubeconfig "$recover_kubeconfig"
+        chmod 600 "$recover_kubeconfig" 2>/dev/null || true
       fi
     fi
-  fi
+  done <<EOF_REREGISTER
+$live
+EOF_REREGISTER
 
   while IFS= read -r name; do
     [ -n "$name" ] || continue

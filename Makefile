@@ -1,11 +1,13 @@
 SHELL := /bin/bash
 TEST_PATTERN ?=
 
-.PHONY: lint test kindctl-lint kindctl-test kindctl-test-integration
+.PHONY: lint test test-integration kindctl-lint kindctl-test kindctl-test-integration
 
 lint: kindctl-lint
 
 test: kindctl-test
+
+test-integration: kindctl-test-integration
 
 kindctl-lint:
 	bash -n skills/kindctl/scripts/kindctl
