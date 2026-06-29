@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-KINDCTL="$ROOT/scripts/kindctl"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+KINDCTL="$REPO_ROOT/skills/kindctl/scripts/kindctl"
 
 skip_or_fail() {
   if [ "${KINDCTL_INTEGRATION_REQUIRE:-}" = "1" ]; then

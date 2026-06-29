@@ -51,10 +51,10 @@ jobs:
           shellcheck --version | head -n 1
 
       - name: Lint
-        run: make -C skills/kindctl lint
+        run: make kindctl-lint
 
       - name: Fast mocked tests
-        run: make -C skills/kindctl test
+        run: make kindctl-test
 
   e2e:
     name: Real kind multi-worktree E2E
@@ -90,8 +90,8 @@ jobs:
 
       - name: Lint and fast tests
         run: |
-          make -C skills/kindctl lint
-          make -C skills/kindctl test
+          make kindctl-lint
+          make kindctl-test
 
       - name: Real multi-worktree kind E2E without global kubeconfig drift
         run: |
@@ -104,7 +104,7 @@ jobs:
             : > "$before"
           fi
 
-          KINDCTL_INTEGRATION_REQUIRE=1 make -C skills/kindctl test-integration
+          KINDCTL_INTEGRATION_REQUIRE=1 make kindctl-test-integration
 
           if [ -f "$HOME/.kube/config" ]; then
             cp "$HOME/.kube/config" "$after"

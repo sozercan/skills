@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-KINDCTL="$ROOT/scripts/kindctl"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SKILL_DIR="$REPO_ROOT/skills/kindctl"
+TEMPLATE_DIR="$REPO_ROOT/templates/kindctl"
+KINDCTL="$SKILL_DIR/scripts/kindctl"
 TEST_PATTERN="${TEST_PATTERN:-}"
 
 pass=0
@@ -443,13 +445,13 @@ test_doctor_missing_tool_preflight_is_clear() {
 }
 
 test_skill_templates_exist_and_are_valid() {
-  [ -f "$ROOT/SKILL.md" ] || fail_msg "missing SKILL.md"
-  [ -f "$ROOT/templates/cluster.yaml" ] || fail_msg "missing template cluster.yaml"
-  [ -x "$ROOT/templates/setup.sh" ] || fail_msg "setup template not executable"
-  assert_contains "$(cat "$ROOT/SKILL.md")" "kindctl kubectl"
-  assert_contains "$(cat "$ROOT/SKILL.md")" "local k8s"
-  assert_contains "$(cat "$ROOT/templates/setup.sh")" "set -euo pipefail"
-  python3 - "$ROOT/templates/cluster.yaml" <<'PY'
+  [ -f "$SKILL_DIR/SKILL.md" ] || fail_msg "missing SKILL.md"
+  [ -f "$TEMPLATE_DIR/cluster.yaml" ] || fail_msg "missing template cluster.yaml"
+  [ -x "$TEMPLATE_DIR/setup.sh" ] || fail_msg "setup template not executable"
+  assert_contains "$(cat "$SKILL_DIR/SKILL.md")" "kindctl kubectl"
+  assert_contains "$(cat "$SKILL_DIR/SKILL.md")" "local k8s"
+  assert_contains "$(cat "$TEMPLATE_DIR/setup.sh")" "set -euo pipefail"
+  python3 - "$TEMPLATE_DIR/cluster.yaml" <<'PY'
 import sys
 text=open(sys.argv[1]).read()
 assert 'kind: Cluster' in text
@@ -458,7 +460,7 @@ PY
 }
 
 test_version_derives_from_git_and_allows_env_override() {
-  expected="$(git -C "$ROOT" describe --tags --always --dirty)"
+  expected="$(git -C "$SKILL_DIR" describe --tags --always --dirty)"
   assert_eq "$($KINDCTL --version)" "kindctl $expected"
   assert_eq "$(KINDCTL_VERSION=dev-test "$KINDCTL" --version)" "kindctl dev-test"
 }

@@ -1,6 +1,6 @@
 # kindctl
 
-[![CI](https://github.com/sozercan/kindctl/actions/workflows/ci.yml/badge.svg)](https://github.com/sozercan/kindctl/actions/workflows/ci.yml)
+[![CI](https://github.com/sozercan/skills/actions/workflows/ci.yml/badge.svg)](https://github.com/sozercan/skills/actions/workflows/ci.yml)
 
 `kindctl` is a small Bash wrapper and agent skill for running **repo/worktree-scoped kind clusters** without ever touching your global Kubernetes config.
 
@@ -89,38 +89,19 @@ All later operations derive the same name again from the current directory.
 
 ## Install
 
-Install the skill globally with the standard [`skills`](https://github.com/vercel-labs/skills) installer:
+Install from the skills collection with the standard `skills` CLI:
 
 ```sh
-npx --yes skills@latest add sozercan/kindctl \
-  --global \
-  --skill kindctl \
-  --agent claude-code \
-  --agent codex \
-  --yes
+npx skills@latest add sozercan/skills --skill kindctl -y
 ```
 
-From a local checkout, the Makefile delegates to the same installer:
+Install all skills from the collection:
 
 ```sh
-make install-skill
+npx skills@latest add sozercan/skills --all
 ```
 
-The `skills` CLI owns the agent-specific paths, including the universal `~/.agents/skills` layout and any Claude/Codex wiring it needs. This avoids hard-coding every supported agent's install directory in this repo.
-
-Optional CLI convenience:
-
-```sh
-make install-cli
-```
-
-That symlinks only the executable:
-
-```text
-~/.local/bin/kindctl -> this repo/scripts/kindctl
-```
-
-You can also call the wrapper directly:
+You can call the wrapper directly from the installed skill:
 
 ```sh
 $HOME/.agents/skills/kindctl/scripts/kindctl --help

@@ -36,14 +36,13 @@ kind create cluster
 
 ## Installation
 
-From the skill repository:
+Install from the skills collection:
 
 ```sh
-make install-skill   # symlink this repo to ~/.claude/skills/kindctl
-make install-cli     # optional: symlink scripts/kindctl to ~/.local/bin/kindctl
+npx skills@latest add sozercan/skills --skill kindctl -y
 ```
 
-The skill itself should invoke `scripts/kindctl` by absolute path or by resolving the skill directory. Do not rely on shell aliases.
+The skill itself should invoke `scripts/kindctl` by absolute path or by resolving the installed skill directory. Do not rely on shell aliases.
 
 ## Commands
 

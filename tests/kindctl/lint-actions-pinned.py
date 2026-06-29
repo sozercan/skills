@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve()
-REPO_ROOT = HERE.parents[3] if len(HERE.parents) > 3 else HERE.parents[1]
+REPO_ROOT = HERE.parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 USES_RE = re.compile(r"^\s*uses:\s*([^\s#]+)")
