@@ -16,7 +16,7 @@ concurrency:
 
 env:
   KIND_VERSION: v0.32.0
-  KUBERNETES_VERSION: v1.34.1
+  KUBERNETES_VERSION: v1.36.1
 
 jobs:
   fast:
