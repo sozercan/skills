@@ -77,8 +77,8 @@ jobs:
             exit 0
           fi
 
+          pr_head_sha="$(jq -r '.headRefOid' <<<"$pr_json")"
           if [ -n "${HEAD_SHA:-}" ]; then
-            pr_head_sha="$(jq -r '.headRefOid' <<<"$pr_json")"
             pr_head_repo="$(jq -r '.headRepository.nameWithOwner' <<<"$pr_json")"
             if [ "$pr_head_sha" != "$HEAD_SHA" ]; then
               echo "Refusing to automerge PR #$pr_number: PR head $pr_head_sha does not match successful workflow head $HEAD_SHA." >&2
@@ -91,6 +91,7 @@ jobs:
           else
             echo "Manual dispatch: waiting for PR #$pr_number checks to pass before merge."
             gh pr checks "$pr_number" --repo "$REPO" --watch --fail-fast
+            pr_head_sha="$(gh pr view "$pr_number" --repo "$REPO" --json headRefOid --jq '.headRefOid')"
           fi
 
           echo "Approving Dependabot PR #$pr_number after successful CI."
@@ -103,4 +104,5 @@ jobs:
           gh pr merge "$pr_number" \
             --repo "$REPO" \
             --squash \
+            --match-head-commit "$pr_head_sha" \
             --delete-branch
