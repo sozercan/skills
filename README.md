@@ -10,26 +10,39 @@ skills/
 
 Each skill is self-contained. There are no category folders under `skills/` unless a future skill genuinely needs extra supporting files.
 
+Skills may include runtime support files such as `scripts/`. Non-runtime maintenance files live outside the install payload, for example in root-level `tests/` and `templates/`.
+
 ## Available skills
 
 | Skill | Purpose |
 | --- | --- |
 | [`a365-cli`](skills/a365-cli/SKILL.md) | Safe user-facing operation of the `a365` CLI for Microsoft 365 through agent365 MCP servers. |
 | [`kusto-cli`](skills/kusto-cli/SKILL.md) | Safe user-facing operation of `kusto-cli` for Azure Data Explorer/Kusto terminal work. |
+| [`kindctl`](skills/kindctl/SKILL.md) | Repo/worktree-scoped kind cluster management. Installs only the skill docs and runtime `scripts/kindctl`; tests and templates stay outside the skill payload. |
 
-## Install locally
+## Install
 
-Copy or symlink the skill directories into your agent's skills directory.
+Install all skills with the `skills` CLI:
 
 ```bash
-# Copy one skill
-cp -R skills/a365-cli ~/.agents/skills/
-
-# Or copy all skills
-cp -R skills/* ~/.agents/skills/
+npx skills@latest add sozercan/skills --all
 ```
 
-If your agent uses a different skills directory, copy `skills/<skill-name>` there instead. The important file is always `SKILL.md` at the root of the skill directory.
+List available skills without installing:
+
+```bash
+npx skills@latest add sozercan/skills --list
+```
+
+Install one skill:
+
+```bash
+npx skills@latest add sozercan/skills --skill a365-cli -y
+npx skills@latest add sozercan/skills --skill kindctl -y
+npx skills@latest add sozercan/skills --skill kusto-cli -y
+```
+
+Add `--global` to install globally instead of project-locally, or `--agent <name>` to target a specific supported agent.
 
 ## Writing style
 
@@ -43,18 +56,11 @@ These skills are meant to be practical operator guides:
 
 ## Add a skill
 
+Use the `skills` CLI initializer from the `skills/` directory:
+
 ```bash
-mkdir -p skills/my-skill
-cat > skills/my-skill/SKILL.md <<'SKILL'
----
-name: my-skill
-description: Briefly states what this skill does. Use when the user asks for the concrete tasks this skill handles.
----
-
-# My Skill
-
-Describe the core workflow here.
-SKILL
+cd skills
+npx skills@latest init my-skill
 ```
 
-Keep the top-level `skills/` directory flat unless there is a strong reason to add more structure.
+Then edit `skills/my-skill/SKILL.md`. Keep the top-level `skills/` directory flat unless there is a strong reason to add more structure.
