@@ -57,6 +57,7 @@ SAFE_DIFF_FLAGS = (
     "--src-prefix=a/",
     "--dst-prefix=b/",
 )
+DIFF_SECTION_PREFIXES = ("diff --git ", "diff --cc ", "diff --combined ")
 ENGINE_GIT_CONFIG_OVERRIDES = (
     ("core.fsmonitor", "false"),
     ("core.pager", "cat"),
@@ -1705,6 +1706,86 @@ def current_branch(repo: Path) -> str:
     return git(repo, "branch", "--show-current", check=False).strip() or "detached"
 
 
+def default_branch(repo: Path) -> tuple[str, str] | None:
+    def resolved(ref: str) -> bool:
+        return bool(
+            git(
+                repo,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"{ref}^{{commit}}",
+                check=False,
+            ).strip()
+        )
+
+    remote_head = git(
+        repo,
+        "symbolic-ref",
+        "--quiet",
+        "--short",
+        "refs/remotes/origin/HEAD",
+        check=False,
+    ).strip()
+    if remote_head.startswith("origin/") and resolved(remote_head):
+        return remote_head.removeprefix("origin/"), remote_head
+
+    for candidate in ("main", "master"):
+        remote_ref = f"origin/{candidate}"
+        if resolved(remote_ref):
+            return candidate, remote_ref
+        if resolved(candidate):
+            return candidate, candidate
+
+    remote_branches = [
+        ref
+        for ref in git(
+            repo,
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/remotes/origin",
+        ).splitlines()
+        if ref and ref != "origin/HEAD"
+    ]
+    if len(remote_branches) == 1:
+        remote_ref = remote_branches[0]
+        return remote_ref.removeprefix("origin/"), remote_ref
+
+    local_branches = [
+        ref
+        for ref in git(
+            repo,
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+        ).splitlines()
+        if ref
+    ]
+    if len(local_branches) == 1:
+        return local_branches[0], local_branches[0]
+
+    branch = current_branch(repo)
+    ancestors = [
+        candidate
+        for candidate in local_branches
+        if candidate != branch
+        and git_result(
+            repo,
+            "merge-base",
+            "--is-ancestor",
+            candidate,
+            "HEAD",
+            check=False,
+        ).returncode
+        == 0
+    ]
+    if len(ancestors) == 1:
+        candidate = ancestors[0]
+        remote_ref = f"origin/{candidate}"
+        return candidate, remote_ref if resolved(remote_ref) else candidate
+    return None
+
+
 def is_dirty(repo: Path) -> bool:
     return bool(
         git(
@@ -1724,9 +1805,20 @@ def choose_target(repo: Path, mode: str, base_ref: str | None) -> tuple[str, str
         return "local", None
     if mode == "commit":
         return "commit", None
-    if mode == "branch" or (mode == "auto" and branch != "main"):
-        return "branch", base_ref or detect_pr_base(repo) or "origin/main"
-    raise SystemExit("no review target: clean main checkout and no forced mode")
+
+    default = default_branch(repo)
+    if mode == "auto" and default is not None and branch == default[0]:
+        raise SystemExit(
+            "no review target: clean default-branch checkout and no forced mode"
+        )
+    selected_base = base_ref or detect_pr_base(repo)
+    if selected_base:
+        return "branch", selected_base
+    if default is not None:
+        return "branch", default[1]
+    raise SystemExit(
+        "unable to determine the default branch; pass --base for branch review"
+    )
 
 
 def detect_pr_base(repo: Path) -> str | None:
@@ -1807,7 +1899,13 @@ def first_executable_candidate(path: Path, *, reject_root: Path | None = None) -
     return None
 
 
-def validate_git_ref(repo: Path, ref: str, label: str) -> str:
+def resolve_git_ref(
+    repo: Path,
+    ref: str,
+    label: str,
+    *,
+    required: bool = True,
+) -> str | None:
     if not ref or ref.startswith("-") or ":" in ref or "\0" in ref or any(char.isspace() for char in ref):
         raise SystemExit(f"unsafe {label} ref: {ref}")
     result = git(
@@ -1818,10 +1916,18 @@ def validate_git_ref(repo: Path, ref: str, label: str) -> str:
         "--end-of-options",
         f"{ref}^{{commit}}",
         check=False,
-    )
+    ).strip()
     if not result:
-        raise SystemExit(f"unknown {label} ref: {ref}")
-    return ref
+        if required:
+            raise SystemExit(f"unknown {label} ref: {ref}")
+        return None
+    return result
+
+
+def validate_git_ref(repo: Path, ref: str, label: str) -> str:
+    resolved = resolve_git_ref(repo, ref, label)
+    assert resolved is not None
+    return resolved
 
 
 def bounded(text: str, limit: int = 180_000) -> str:
@@ -5606,7 +5712,7 @@ def validate_review_patch(
     sections = [
         unit
         for unit in review_bundle_units(patch)
-        if unit.startswith("diff --git ")
+        if unit.startswith(DIFF_SECTION_PREFIXES)
     ]
     if sections:
         expected_paths = set(paths)
@@ -5786,7 +5892,7 @@ def safe_untracked_files(repo: Path) -> list[str]:
 def local_status(repo: Path, untracked: list[str]) -> str:
     status = git(repo, "status", "--short", "--untracked-files=no").rstrip()
     lines = [status] if status else []
-    lines.extend(f"?? {rel}" for rel in untracked)
+    lines.extend(f"?? {json.dumps(rel, ensure_ascii=False)}" for rel in untracked)
     return "\n".join(lines)
 
 
@@ -6006,6 +6112,33 @@ def source_tree_snapshot(
         for rel in sorted(set(tracked + untracked))
     )
     return head, index_entries, fingerprints
+
+
+def review_input_snapshot(
+    repo: Path,
+    target: str,
+    target_ref: str | None,
+    commit_ref: str,
+    *,
+    require_refs: bool = True,
+) -> tuple[object, str | None]:
+    reviewed_ref: str | None = None
+    if target == "branch":
+        assert target_ref is not None
+        reviewed_ref = resolve_git_ref(
+            repo,
+            target_ref,
+            "base",
+            required=require_refs,
+        )
+    elif target == "commit":
+        reviewed_ref = resolve_git_ref(
+            repo,
+            commit_ref,
+            "commit",
+            required=require_refs,
+        )
+    return source_tree_snapshot(repo), reviewed_ref
 
 
 def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
@@ -6290,7 +6423,7 @@ def review_bundle_units(bundle: str) -> list[str]:
     units: list[str] = []
     current: list[str] = []
     for line in literal_lf_lines(bundle):
-        boundary = line.startswith("diff --git ") or line in section_boundaries
+        boundary = line.startswith(DIFF_SECTION_PREFIXES) or line in section_boundaries
         if boundary and current:
             units.append("".join(current))
             current = []
@@ -6315,7 +6448,7 @@ def update_review_chunk_context(
     next_old_line: int | None,
     in_hunk: bool,
 ) -> tuple[int | None, int | None, bool]:
-    if line.startswith("diff --git "):
+    if line.startswith(DIFF_SECTION_PREFIXES):
         context[:] = [line]
         return None, None, False
     if line == "# Untracked File\n":
@@ -6336,13 +6469,15 @@ def update_review_chunk_context(
         context[:] = [entry for entry in context if not entry.startswith(header_prefix)]
         context.append(line)
         return next_new_line, next_old_line, False
-    if line.startswith("@@ "):
-        context[:] = [entry for entry in context if not entry.startswith("@@ ")]
+    if line.startswith("@@"):
+        context[:] = [entry for entry in context if not entry.startswith("@@")]
         context.append(line)
-        match = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
-        if not match:
+        ranges = re.findall(r"([+-])(\d+)(?:,\d+)?", line)
+        new_lines = [int(number) for marker, number in ranges if marker == "+"]
+        old_lines = [int(number) for marker, number in ranges if marker == "-"]
+        if not new_lines or not old_lines:
             return None, None, True
-        return int(match.group(2)), int(match.group(1)), True
+        return new_lines[-1], old_lines[0], True
     if in_hunk and line.startswith(" "):
         return increment_line(next_new_line), increment_line(next_old_line), True
     if in_hunk and line.startswith("+"):
@@ -6361,7 +6496,7 @@ def compact_review_chunk_context(context: list[str]) -> list[str]:
         return list(context)
     new_header = next((entry for entry in context if entry.startswith("+++ ")), None)
     old_header = next((entry for entry in context if entry.startswith("--- ")), None)
-    hunk_header = next((entry for entry in context if entry.startswith("@@ ")), None)
+    hunk_header = next((entry for entry in context if entry.startswith("@@")), None)
     path_header = new_header if new_header and new_header != "+++ /dev/null\n" else old_header
     compact = [path_header or context[0]]
     if hunk_header:
@@ -6863,8 +6998,8 @@ def parse_codex_auth_config_fallback(text: str) -> dict[str, Any]:
 
 def load_codex_auth_config(path: Path) -> dict[str, Any]:
     try:
-        text = path.read_text()
-    except OSError:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
         return {}
     try:
         import tomllib
@@ -7276,7 +7411,7 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
                 else source_codex_home
             )
             for index, model in enumerate(models):
-                output_path.write_text("")
+                output_path.write_text("", encoding="utf-8")
                 cmd = codex_command(
                     args,
                     repo,
@@ -7313,7 +7448,7 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
                     ),
                     resolve_root=repo,
                 )
-                output = output_path.read_text()
+                output = output_path.read_text(encoding="utf-8")
                 if result.returncode == 0:
                     return output or result.stdout
                 if (
@@ -9836,7 +9971,9 @@ def main() -> int:
     if args.dry_run:
         return 0
 
-    review_source_snapshot = source_tree_snapshot(repo)
+    review_source_snapshot = review_input_snapshot(
+        repo, target, target_ref, args.commit
+    )
     if target == "local":
         bundle, bundle_truncated = local_bundle(repo)
     elif target == "branch":
@@ -9858,7 +9995,9 @@ def main() -> int:
     )
     changed_paths = review_paths(repo, target, target_ref, args.commit)
     print(f"bundle: {utf8_size(bundle)} bytes; review passes: {len(prompts)}")
-    if source_tree_snapshot(repo) != review_source_snapshot:
+    if review_input_snapshot(
+        repo, target, target_ref, args.commit, require_refs=False
+    ) != review_source_snapshot:
         raise SystemExit(
             "source changed while the review bundle was being created; "
             "rerun autoreview against the updated tree"
@@ -9907,7 +10046,9 @@ def main() -> int:
     finally:
         tests_status = finish_parallel_tests(*tests_proc) if tests_proc else 0
 
-    if source_tree_snapshot(repo) != review_source_snapshot:
+    if review_input_snapshot(
+        repo, target, target_ref, args.commit, require_refs=False
+    ) != review_source_snapshot:
         print(
             "source changed after the review bundle was created; "
             "rerun autoreview against the updated tree",

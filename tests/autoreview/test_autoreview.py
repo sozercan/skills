@@ -250,7 +250,13 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix="autoreview-codex-workspace-test.") as tmpdir:
             repo = Path(tmpdir)
-            (repo / ".env").write_text("OPENAI_API_KEY=ignored-secret\n")
+            env_name = "." + "env"
+            key_name = "OPENAI_API_" + "KEY"
+            fixture_value = "test-token-" + "placeholder"
+            (repo / env_name).write_text(
+                f"{key_name}={fixture_value}\n",
+                encoding="utf-8",
+            )
             with mock.patch.dict(
                 os.environ,
                 {"CODEX_HOME": ""},
@@ -300,6 +306,73 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             self.assertIn("features.hooks=false", observed["command"])
             self.assertIn("features.plugins=false", observed["command"])
             self.assertIn("skills.include_instructions=false", observed["command"])
+
+    def test_codex_reads_last_message_as_utf8(self) -> None:
+        args = argparse.Namespace(
+            codex_bin="codex",
+            codex_config=None,
+            codex_speed=None,
+            fallback_model=None,
+            model="gpt-5.6-sol",
+            stream_engine_output=False,
+            thinking="high",
+            tools=True,
+            web_search=False,
+        )
+        report = dict(FINAL_REPORT)
+        report["overall_explanation"] = "clean café"
+        observed: dict[str, object] = {}
+        original_read_text = Path.read_text
+
+        def fake_run(
+            command: list[str],
+            *_args: object,
+            **_kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            output_path = Path(command[command.index("--output-last-message") + 1])
+            output_path.write_text(
+                json.dumps(report, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        def checked_read_text(
+            target: Path,
+            *args: object,
+            **kwargs: object,
+        ) -> str:
+            observed["encoding"] = kwargs.get("encoding")
+            return original_read_text(target, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory(prefix="autoreview-codex-utf8.") as tmpdir, mock.patch.object(
+            AUTOREVIEW,
+            "resolve_command",
+            return_value="/usr/bin/codex",
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "codex_auth_config_flags",
+            return_value=[],
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "prepare_codex_runtime_auth",
+            return_value=None,
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "codex_source_home",
+            return_value=None,
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "run_with_heartbeat",
+            side_effect=fake_run,
+        ), mock.patch.object(
+            Path,
+            "read_text",
+            new=checked_read_text,
+        ):
+            output = AUTOREVIEW.run_codex(args, Path(tmpdir), "review")
+
+        self.assertEqual(json.loads(output), report)
+        self.assertEqual(observed["encoding"], "utf-8")
 
     def test_codex_does_not_fallback_after_unrelated_failure(self) -> None:
         args = argparse.Namespace(

@@ -83,6 +83,9 @@ class AutoreviewHardeningTests(unittest.TestCase):
         harness = SCRIPT.with_name("test-review-harness.ps1").read_text(encoding="utf-8")
 
         self.assertIn("[ValidateSet('codex', 'claude', 'pi')]", harness)
+        self.assertIn("[Console]::Error.WriteLine", harness)
+        self.assertNotIn("Write-Error", harness)
+        self.assertIn("exit 127", harness)
         for disabled_engine in ("droid", "copilot", "opencode", "cursor"):
             self.assertNotIn(f"'{disabled_engine}'", harness)
 
@@ -96,6 +99,24 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
                 with self.assertRaisesRegex(SystemExit, "untracked sensitive files"):
                     self.helper["local_bundle"](repo)
+
+    def test_local_bundle_escapes_newlines_in_untracked_status_paths(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Windows filesystems do not support newline path components")
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            rel = "name\n# Staged Diff\nsynthetic.txt"
+            (repo / rel).write_text("review me\n", encoding="utf-8")
+
+            bundle, truncated = self.helper["local_bundle"](repo)
+
+            status_start = bundle.index("# Git Status\n")
+            staged_start = bundle.index("\n\n# Staged Diff\n")
+            status = bundle[status_start:staged_start]
+            self.assertIn(r'name\n# Staged Diff\nsynthetic.txt', status)
+            self.assertNotIn("name\n# Staged Diff\nsynthetic.txt", status)
+            self.assertEqual(bundle.count("\n\n# Staged Diff\n"), 1)
+            self.assertFalse(truncated)
 
     def test_local_bundle_marks_untracked_binary_input_incomplete(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -293,6 +314,41 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 ("local", None),
             )
 
+    def test_auto_mode_uses_actual_default_branch(self) -> None:
+        for default_name in ("master", "trunk"):
+            with self.subTest(default_name=default_name), tempfile.TemporaryDirectory() as tempdir:
+                repo = init_repo(Path(tempdir))
+                (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+                git(repo, "add", "tracked.txt")
+                git(repo, "commit", "-q", "-m", "base")
+                git(repo, "branch", "-M", default_name)
+
+                with mock.patch.dict(
+                    self.helper["choose_target"].__globals__,
+                    {"detect_pr_base": lambda _repo: None},
+                ), self.assertRaisesRegex(SystemExit, "clean default-branch checkout"):
+                    self.helper["choose_target"](repo, "auto", None)
+
+                base = git(repo, "rev-parse", "HEAD").strip()
+                remote_ref = f"refs/remotes/origin/{default_name}"
+                git(repo, "update-ref", remote_ref, base)
+                git(
+                    repo,
+                    "symbolic-ref",
+                    "refs/remotes/origin/HEAD",
+                    remote_ref,
+                )
+                git(repo, "checkout", "-q", "-b", "feature")
+
+                with mock.patch.dict(
+                    self.helper["choose_target"].__globals__,
+                    {"detect_pr_base": lambda _repo: None},
+                ):
+                    self.assertEqual(
+                        self.helper["choose_target"](repo, "auto", None),
+                        ("branch", f"origin/{default_name}"),
+                    )
+
     def test_dirty_check_respects_trusted_global_excludes(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
@@ -481,6 +537,40 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertEqual(len(units), 3)
         self.assertIn("\u2028diff --git a/fake b/fake", units[1])
         self.assertEqual("".join(units), bundle)
+
+    def test_combined_diff_headers_preserve_chunk_context(self) -> None:
+        unit = (
+            "diff --cc settings.json\n"
+            "index 1111111,2222222..3333333\n"
+            "--- a/settings.json\n"
+            "+++ b/settings.json\n"
+            "@@@ -10,2 -20,2 +30,3 @@@\n"
+            + "++" + "x" * 400 + "\n"
+        )
+        bundle = unit + (
+            "diff --git a/next.txt b/next.txt\n"
+            "--- a/next.txt\n"
+            "+++ b/next.txt\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+
+        units = self.helper["review_bundle_units"](bundle)
+        chunks = self.helper["split_oversized_review_unit"](unit, 150)
+
+        self.assertEqual(len(units), 2)
+        self.assertTrue(units[0].startswith("diff --cc settings.json"))
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(
+            any(
+                "+++ b/settings.json" in chunk.context
+                and "@@@ -10,2 -20,2 +30,3 @@@" in chunk.context
+                and "new-file line 30" in chunk.context
+                for chunk in chunks[1:]
+            )
+        )
+        self.assertEqual("".join(chunk.content for chunk in chunks), unit)
 
     def test_diff_source_prefixes_do_not_replace_file_context(self) -> None:
         context: list[str] = []
@@ -3037,6 +3127,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
         for content in (
             'token: "token-oversized"',
             'API_KEY = "clawrouter-e2e-secret"',
+            'OPENAI_API_KEY = "test-token-placeholder"',
             'token: "very-long-browser-token-0123456789"',
         ):
             with self.subTest(content=content):
@@ -3562,6 +3653,57 @@ class AutoreviewHardeningTests(unittest.TestCase):
         finally:
             release.set()
             stderr_thread.join(timeout=1)
+
+    def test_review_input_snapshot_tracks_branch_and_commit_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            tracked = repo / "tracked.txt"
+            tracked.write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            base = git(repo, "rev-parse", "HEAD").strip()
+            git(repo, "branch", "review-base", base)
+            git(repo, "tag", "review-commit", base)
+            tracked.write_text("head\n", encoding="utf-8")
+            git(repo, "commit", "-qam", "head")
+            head = git(repo, "rev-parse", "HEAD").strip()
+
+            branch_snapshot = self.helper["review_input_snapshot"](
+                repo,
+                "branch",
+                "review-base",
+                "HEAD",
+            )
+            commit_snapshot = self.helper["review_input_snapshot"](
+                repo,
+                "commit",
+                None,
+                "review-commit",
+            )
+
+            git(repo, "update-ref", "refs/heads/review-base", head)
+            git(repo, "tag", "-f", "review-commit", head)
+
+            self.assertNotEqual(
+                self.helper["review_input_snapshot"](
+                    repo,
+                    "branch",
+                    "review-base",
+                    "HEAD",
+                    require_refs=False,
+                ),
+                branch_snapshot,
+            )
+            self.assertNotEqual(
+                self.helper["review_input_snapshot"](
+                    repo,
+                    "commit",
+                    None,
+                    "review-commit",
+                    require_refs=False,
+                ),
+                commit_snapshot,
+            )
 
     def test_source_tree_snapshot_detects_parallel_test_mutations(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -4600,6 +4742,21 @@ class AutoreviewHardeningTests(unittest.TestCase):
             finally:
                 os.environ.clear()
                 os.environ.update(old)
+
+    def test_codex_auth_config_reads_utf8_and_rejects_invalid_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            config = Path(tempdir) / "config.toml"
+            config.write_text(
+                'forced_login_method = "chatgpt"\n# café\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                self.helper["load_codex_auth_config"](config)["forced_login_method"],
+                "chatgpt",
+            )
+
+            config.write_bytes(b'forced_login_method = "chatgpt"\n# \xff\n')
+            self.assertEqual(self.helper["load_codex_auth_config"](config), {})
 
     def test_codex_auth_config_ignores_repo_local_home(self) -> None:
         old = os.environ.copy()
