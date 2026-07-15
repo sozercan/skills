@@ -51,10 +51,10 @@ jobs:
           shellcheck --version | head -n 1
 
       - name: Lint
-        run: make kindctl-lint
+        run: make lint
 
-      - name: Fast mocked tests
-        run: make kindctl-test
+      - name: Fast tests
+        run: make test
 
   e2e:
     name: Real kind multi-worktree E2E
