@@ -9864,18 +9864,21 @@ def self_test() -> int:
     return self_test_engine_isolation()
 
 
+def normalize_output_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    return (path if path.is_absolute() else Path.cwd() / path).resolve()
+
+
 def reject_repo_output_paths(args: argparse.Namespace, repo: Path) -> None:
     repo_root_path = repo.resolve()
-    for option, value in (
-        ("--json-output", args.json_output),
-        ("--output", args.output),
+    for option, attribute in (
+        ("--json-output", "json_output"),
+        ("--output", "output"),
     ):
+        value = getattr(args, attribute)
         if not value:
             continue
-        path = Path(value).expanduser()
-        resolved = (
-            path if path.is_absolute() else Path.cwd() / path
-        ).resolve()
+        resolved = normalize_output_path(value)
         inside_repo = resolved.is_relative_to(repo_root_path)
         if not inside_repo:
             for ancestor in (resolved, *resolved.parents):
@@ -9885,12 +9888,12 @@ def reject_repo_output_paths(args: argparse.Namespace, repo: Path) -> None:
                         break
                 except OSError:
                     continue
-        if not inside_repo:
-            continue
-        raise SystemExit(
-            f"{option} must point outside the reviewed repository: "
-            f"{display_escape(value, 500)}"
-        )
+        if inside_repo:
+            raise SystemExit(
+                f"{option} must point outside the reviewed repository: "
+                f"{display_escape(value, 500)}"
+            )
+        setattr(args, attribute, str(resolved))
 
 
 def atomic_write_text(path: Path, content: str) -> None:

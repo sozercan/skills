@@ -3797,6 +3797,37 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     repo,
                 )
 
+    def test_output_paths_expand_tilde_before_validation_and_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            home = root / "home"
+            home.mkdir()
+            args = argparse.Namespace(
+                json_output="~/review.json",
+                output="~/review.txt",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": str(home), "USERPROFILE": str(home)},
+            ):
+                self.helper["reject_repo_output_paths"](args, repo)
+
+            self.assertEqual(args.json_output, str((home / "review.json").resolve()))
+            self.assertEqual(args.output, str((home / "review.txt").resolve()))
+            self.helper["atomic_write_text"](Path(args.json_output), "{}\n")
+            self.helper["atomic_write_text"](Path(args.output), "review\n")
+            self.assertEqual(
+                (home / "review.json").read_text(encoding="utf-8"),
+                "{}\n",
+            )
+            self.assertEqual(
+                (home / "review.txt").read_text(encoding="utf-8"),
+                "review\n",
+            )
+            self.assertFalse((repo / "~").exists())
+
     def test_atomic_output_replaces_hard_link_without_touching_repo_file(
         self,
     ) -> None:
