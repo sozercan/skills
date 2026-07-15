@@ -103,6 +103,12 @@ class AutoreviewCursorTests(unittest.TestCase):
 
 
 class AutoreviewCompatibilityTests(unittest.TestCase):
+    def test_reviewer_args_rejects_empty_reviewer_list(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "at least one reviewer"):
+            AUTOREVIEW.reviewer_args(
+                AUTOREVIEW.reviewer_test_args(reviewers=" , , ")
+            )
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.home_dir = tempfile.TemporaryDirectory(prefix="autoreview-test-home.")

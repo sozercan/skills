@@ -171,6 +171,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_gitlink_changes_are_blocked_in_all_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
+            git(repo, "config", "diff.ignoreSubmodules", "all")
             tracked = repo / "tracked.txt"
             tracked.write_text("base\n", encoding="utf-8")
             git(repo, "add", "tracked.txt")
@@ -183,6 +184,11 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 "--add",
                 "--cacheinfo",
                 f"160000,{base},vendor/dependency",
+            )
+            self.assertTrue(self.helper["is_dirty"](repo))
+            self.assertEqual(
+                self.helper["choose_target"](repo, "auto", None),
+                ("local", None),
             )
             with self.assertRaisesRegex(SystemExit, "gitlink/submodule changes"):
                 self.helper["local_bundle"](repo)
@@ -274,6 +280,18 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     self.helper["safe_untracked_files"](repo),
                     ["hostile-gitconfig", "visible.txt"],
                 )
+
+    def test_dirty_check_forces_untracked_files_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            git(repo, "config", "status.showUntrackedFiles", "no")
+            (repo / "notes.txt").write_text("review me\n", encoding="utf-8")
+
+            self.assertTrue(self.helper["is_dirty"](repo))
+            self.assertEqual(
+                self.helper["choose_target"](repo, "auto", None),
+                ("local", None),
+            )
 
     def test_dirty_check_respects_trusted_global_excludes(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -2400,6 +2418,32 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 source_patch + config_patch,
             )
 
+    def test_local_bundle_forces_canonical_diff_prefixes(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            source = repo / "src" / "runtime.ts"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                "export function configure(context: RuntimeContext) { return {}; }\n",
+                encoding="utf-8",
+            )
+            git(repo, "add", "src/runtime.ts")
+            git(repo, "commit", "-q", "-m", "base")
+            git(repo, "config", "diff.noprefix", "true")
+            property_name = "pass" + "word"
+            reference = "context.driverPass" + "word"
+            source.write_text(
+                "export function configure(context: RuntimeContext) { "
+                f"return {{ {property_name}: {reference} }}; }}\n",
+                encoding="utf-8",
+            )
+
+            bundle, truncated = self.helper["local_bundle"](repo)
+
+            self.assertIn("--- a/src/runtime.ts", bundle)
+            self.assertIn("+++ b/src/runtime.ts", bundle)
+            self.assertFalse(truncated)
+
     def test_review_patch_scans_rename_sides_with_their_own_file_types(self) -> None:
         property_name = "pass" + "word"
         reference = "context.driverPass" + "word"
@@ -2618,6 +2662,31 @@ class AutoreviewHardeningTests(unittest.TestCase):
         content = 'password="' + "correcthorsebatterystaple" + '"'
 
         self.assertTrue(self.helper["secret_text_risk"](content))
+
+    def test_review_patch_rejects_passphrase_key_aliases(self) -> None:
+        aliases = (
+            "pass" + "phrase",
+            "pass" + "wd",
+            "database_pass" + "phrase",
+            "databasePass" + "phrase",
+            "DATABASE_PASS" + "PHRASE",
+        )
+        value = "correct" + "horsebatterystaple"
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                patch = (
+                    "diff --git a/config.yml b/config.yml\n"
+                    "--- a/config.yml\n"
+                    "+++ b/config.yml\n"
+                    "@@ -0,0 +1 @@\n"
+                    f'+{alias}: "{value}"\n'
+                )
+                with self.assertRaisesRegex(SystemExit, "secret-like content"):
+                    self.helper["validate_review_patch"](
+                        "local staged diff",
+                        ["config.yml"],
+                        patch,
+                    )
 
     def test_secret_detector_handles_low_diversity_passwords(self) -> None:
         for content in (

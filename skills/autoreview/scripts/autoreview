@@ -49,7 +49,14 @@ SAFE_GIT_CONFIG_ARGS = (
     "-c",
     "pager.show=cat",
 )
-SAFE_DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-renames")
+SAFE_DIFF_FLAGS = (
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-renames",
+    "--ignore-submodules=none",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+)
 ENGINE_GIT_CONFIG_OVERRIDES = (
     ("core.fsmonitor", "false"),
     ("core.pager", "cat"),
@@ -154,7 +161,7 @@ SECRET_KEY_NAME_PATTERN = (
     r"(?:api[_-]?key|aws[_-]?secret[_-]?access[_-]?key"
     r"|client[_-]?secret|refresh[_-]?token|access[_-]?token"
     r"|auth[_-]?token|id[_-]?token|token|secret|password"
-    r"|credentials?|private[_-]?key)"
+    r"|passphrase|passwd|credentials?|private[_-]?key)"
 )
 SECRET_SEPARATED_KEY_NAME_PATTERN = (
     rf"(?:[A-Za-z0-9]{{1,64}}"
@@ -165,20 +172,20 @@ SECRET_LOWER_KEY_NAME_PATTERN = (
     r"(?-i:[a-z][a-z0-9]*"
     r"(?:apikey|awssecretaccesskey|clientsecret|refreshtoken"
     r"|accesstoken|authtoken|idtoken|token|secret|password"
-    r"|credential|credentials|privatekey))"
+    r"|passphrase|passwd|credential|credentials|privatekey))"
 )
 SECRET_CAMEL_KEY_NAME_PATTERN = (
     r"(?-i:[A-Za-z][A-Za-z0-9]*"
     r"(?:ApiKey|APIKey|AwsSecretAccessKey|AWSSecretAccessKey"
     r"|ClientSecret|RefreshToken|AccessToken|AuthToken|IdToken|IDToken"
-    r"|Token|Secret|Password"
+    r"|Token|Secret|Password|Passphrase|Passwd"
     r"|Credential|Credentials|PrivateKey))"
 )
 SECRET_UPPER_KEY_NAME_PATTERN = (
     r"(?-i:[A-Z][A-Z0-9]*"
     r"(?:APIKEY|AWSSECRETACCESSKEY|CLIENTSECRET|REFRESHTOKEN"
     r"|ACCESSTOKEN|AUTHTOKEN|IDTOKEN|TOKEN|SECRET|PASSWORD"
-    r"|CREDENTIAL|CREDENTIALS|PRIVATEKEY))"
+    r"|PASSPHRASE|PASSWD|CREDENTIAL|CREDENTIALS|PRIVATEKEY))"
 )
 SECRET_ASSIGNMENT_KEY_NAME_PATTERN = (
     rf"(?:{SECRET_SEPARATED_KEY_NAME_PATTERN}"
@@ -1705,6 +1712,7 @@ def is_dirty(repo: Path) -> bool:
             *global_excludes_git_args(repo),
             "status",
             "--porcelain",
+            "--untracked-files=all",
         ).strip()
     )
 
@@ -9249,8 +9257,10 @@ def reviewer_args(args: argparse.Namespace) -> list[argparse.Namespace]:
     env_global_thinking, env_thinking_by_engine = env_defaults_for("thinking")
     env_global_fallback, env_fallback_by_engine = env_defaults_for("fallback-model")
     reviewers: list[tuple[str, str | None, str | None]] = []
-    if args.reviewers:
+    if args.reviewers is not None:
         tokens = [token.strip() for token in args.reviewers.split(",") if token.strip()]
+        if not tokens:
+            raise SystemExit("--reviewers must include at least one reviewer")
         if len(tokens) == 1 and tokens[0] == "all":
             tokens = list(ALL_REVIEWERS)
         reviewers = [parse_reviewer_token(token) for token in tokens]
