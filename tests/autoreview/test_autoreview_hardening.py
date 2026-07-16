@@ -572,7 +572,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
             "index 1111111,2222222..3333333\n"
             "--- a/settings.json\n"
             "+++ b/settings.json\n"
-            "@@@ -10,2 -20,2 +30,3 @@@\n"
+            "@@@ -10,3 -20,2 +30,3 @@@\n"
+            " -removed from second parent only\n"
             + "++" + "x" * 400 + "\n"
         )
         bundle = unit + (
@@ -593,8 +594,9 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "+++ b/settings.json" in chunk.context
-                and "@@@ -10,2 -20,2 +30,3 @@@" in chunk.context
+                and "@@@ -10,3 -20,2 +30,3 @@@" in chunk.context
                 and "new-file line 30" in chunk.context
+                and "old-file line 10" in chunk.context
                 for chunk in chunks[1:]
             )
         )
@@ -3293,6 +3295,64 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 argparse.Namespace(engine="droid", tools=False),
                 True,
             )
+
+    def test_safe_git_reads_disable_signature_hooks_and_color(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            tracked = repo / "tracked.txt"
+            tracked.write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            parent = git(repo, "rev-parse", "HEAD").strip()
+            tree = git(repo, "rev-parse", "HEAD^{tree}").strip()
+            commit_text = (
+                f"tree {tree}\n"
+                f"parent {parent}\n"
+                "author Autoreview Test <autoreview@example.invalid> 0 +0000\n"
+                "committer Autoreview Test <autoreview@example.invalid> 0 +0000\n"
+                "gpgsig -----BEGIN PGP SIGNATURE-----\n"
+                " fake\n"
+                " -----END PGP SIGNATURE-----\n"
+                "\nsigned fixture\n"
+            )
+            result = subprocess.run(
+                ["git", "hash-object", "-t", "commit", "-w", "--stdin"],
+                cwd=repo,
+                input=commit_text,
+                text=True,
+                check=True,
+                stdout=subprocess.PIPE,
+            )
+            commit = result.stdout.strip()
+            git(repo, "update-ref", "HEAD", commit)
+            marker = root / "gpg-invoked"
+            gpg = self.helper["write_executable"](
+                root / "fake-gpg",
+                "#!/bin/sh\nprintf invoked > "
+                + "'"
+                + str(marker).replace("'", "'\"'\"'")
+                + "'\nexit 1\n",
+            )
+            git(repo, "config", "log.showSignature", "true")
+            git(repo, "config", "gpg.program", str(gpg))
+            git(repo, "config", "color.ui", "always")
+            git(repo, "config", "color.diff", "always")
+            git(repo, "config", "color.status", "always")
+
+            shown = self.helper["git"](
+                repo,
+                "show",
+                *self.helper["SAFE_DIFF_FLAGS"],
+                "--format=fuller",
+                "--patch",
+                "HEAD",
+            )
+            status = self.helper["git"](repo, "status", "--short")
+
+            self.assertFalse(marker.exists())
+            self.assertNotIn("\x1b", shown)
+            self.assertNotIn("\x1b", status)
 
     def test_safe_git_env_preserves_trusted_platform_and_helper_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

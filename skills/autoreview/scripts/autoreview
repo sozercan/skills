@@ -39,6 +39,14 @@ SAFE_GIT_CONFIG_ARGS = (
     "-c",
     "core.pager=cat",
     "-c",
+    "color.ui=false",
+    "-c",
+    "color.diff=false",
+    "-c",
+    "color.status=false",
+    "-c",
+    "log.showSignature=false",
+    "-c",
     "diff.external=",
     "-c",
     "diff.renames=false",
@@ -61,6 +69,10 @@ DIFF_SECTION_PREFIXES = ("diff --git ", "diff --cc ", "diff --combined ")
 ENGINE_GIT_CONFIG_OVERRIDES = (
     ("core.fsmonitor", "false"),
     ("core.pager", "cat"),
+    ("color.ui", "false"),
+    ("color.diff", "false"),
+    ("color.status", "false"),
+    ("log.showSignature", "false"),
     ("diff.external", ""),
     ("diff.renames", "false"),
     ("pager.diff", "cat"),
@@ -6440,6 +6452,17 @@ def literal_lf_lines(text: str) -> list[str]:
     return lines
 
 
+def review_hunk_prefix_width(context: list[str]) -> int:
+    hunk_header = next(
+        (entry for entry in reversed(context) if entry.startswith("@@")),
+        None,
+    )
+    if hunk_header is None:
+        return 1
+    marker = re.match(r"^(@{2,})", hunk_header)
+    return max(1, len(marker.group(1)) - 1) if marker else 1
+
+
 def update_review_chunk_context(
     context: list[str],
     line: str,
@@ -6477,12 +6500,28 @@ def update_review_chunk_context(
         if not new_lines or not old_lines:
             return None, None, True
         return new_lines[-1], old_lines[0], True
-    if in_hunk and line.startswith(" "):
-        return increment_line(next_new_line), increment_line(next_old_line), True
-    if in_hunk and line.startswith("+"):
-        return increment_line(next_new_line), next_old_line, True
-    if in_hunk and line.startswith("-"):
-        return next_new_line, increment_line(next_old_line), True
+    if in_hunk:
+        prefix_width = review_hunk_prefix_width(context)
+        prefix = line[:prefix_width]
+        if len(prefix) == prefix_width and set(prefix) <= {"+", "-", " "}:
+            if prefix_width == 1:
+                if prefix == " ":
+                    return increment_line(next_new_line), increment_line(next_old_line), True
+                if prefix == "+":
+                    return increment_line(next_new_line), next_old_line, True
+                return next_new_line, increment_line(next_old_line), True
+
+            result_exists = "+" in prefix or set(prefix) == {" "}
+            first_parent_exists = prefix[0] == "-" or (
+                prefix[0] == " " and result_exists
+            )
+            return (
+                increment_line(next_new_line) if result_exists else next_new_line,
+                increment_line(next_old_line)
+                if first_parent_exists
+                else next_old_line,
+                True,
+            )
     return next_new_line, next_old_line, in_hunk
 
 
@@ -6576,7 +6615,15 @@ def split_oversized_review_unit(
 
     for line in literal_lf_lines(unit):
         line_bytes = utf8_size(line)
-        diff_line_marker = line[0] if in_hunk and line.startswith(("+", "-", " ")) else None
+        prefix_width = review_hunk_prefix_width(context) if in_hunk else 1
+        diff_prefix = line[:prefix_width]
+        diff_line_marker = (
+            diff_prefix
+            if in_hunk
+            and len(diff_prefix) == prefix_width
+            and set(diff_prefix) <= {"+", "-", " "}
+            else None
+        )
         untracked_source_line = None
         if context and context[0] == "# Untracked File\n":
             match = re.match(r"^source-line (\d+): ", line)
