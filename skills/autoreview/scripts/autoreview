@@ -7127,7 +7127,7 @@ def prepare_codex_runtime_auth(
     try:
         data, truncated = read_prefix(source_auth, 1_000_000)
         parsed = json.loads(data)
-    except (OSError, SystemExit, json.JSONDecodeError):
+    except (OSError, SystemExit, UnicodeError, json.JSONDecodeError):
         return False
     if truncated or not isinstance(parsed, dict):
         return False

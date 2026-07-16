@@ -4907,6 +4907,28 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 os.environ.clear()
                 os.environ.update(old)
 
+    def test_codex_runtime_home_rejects_non_utf8_auth_json(self) -> None:
+        old = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            source_home = root / "host-home" / ".codex"
+            runtime_home = root / "runtime" / "codex-home"
+            source_home.mkdir(parents=True)
+            (source_home / "auth.json").write_bytes(b'{"token":"\xff"}')
+            try:
+                os.environ["CODEX_HOME"] = str(source_home)
+                self.assertFalse(
+                    self.helper["prepare_codex_runtime_auth"](
+                        repo,
+                        runtime_home,
+                    )
+                )
+                self.assertFalse((runtime_home / "auth.json").exists())
+            finally:
+                os.environ.clear()
+                os.environ.update(old)
+
     def test_codex_runtime_home_links_only_auth_and_persists_refresh(self) -> None:
         old = os.environ.copy()
         with tempfile.TemporaryDirectory() as tempdir:
