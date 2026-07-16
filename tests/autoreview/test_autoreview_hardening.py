@@ -84,7 +84,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.helper = load_helper()
 
     @unittest.skipIf(os.name == "nt", "POSIX shell wrapper behavior")
-    def test_shell_harness_rejects_non_python3_fallback(self) -> None:
+    def test_shell_harness_rejects_python_older_than_3_9(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
             wrapper = root / "test-review-harness"
@@ -113,7 +113,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 127, result.stderr)
-            self.assertIn("Python 3 is required", result.stderr)
+            self.assertIn("Python 3.9 or newer is required", result.stderr)
 
     def test_init_repo_isolates_signing_and_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -133,7 +133,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertIn("[ValidateSet('codex', 'claude', 'pi')]", harness)
         self.assertIn("[Console]::Error.WriteLine", harness)
         self.assertNotIn("Write-Error", harness)
-        self.assertIn("sys.version_info[0] != 3", harness)
+        self.assertIn("sys.version_info < (3, 9)", harness)
         self.assertIn("$LASTEXITCODE -eq 0", harness)
         self.assertIn("exit 127", harness)
         for disabled_engine in ("droid", "copilot", "opencode", "cursor"):

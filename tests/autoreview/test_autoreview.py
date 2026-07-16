@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import json
 import os
 import runpy
@@ -276,6 +277,76 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
 
         self.assertEqual(json.loads(output), FINAL_REPORT)
         self.assertEqual(models, ["gpt-5.6-sol", "gpt-5.6-terra"])
+
+    def test_codex_fallback_status_escapes_model_controls(self) -> None:
+        primary = "gpt-5.6-sol\n\x1b[31m"
+        fallback = "gpt-5.6-terra\x07"
+        args = argparse.Namespace(
+            codex_bin="codex",
+            codex_config=None,
+            codex_speed=None,
+            fallback_model=fallback,
+            model=primary,
+            stream_engine_output=False,
+            thinking="high",
+            tools=True,
+            web_search=False,
+        )
+        calls = 0
+
+        def fake_run(
+            command: list[str],
+            *_args: object,
+            **_kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return subprocess.CompletedProcess(
+                    command,
+                    1,
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "message": (
+                                f"The model `{primary}` does not exist or "
+                                "you do not have access to it."
+                            ),
+                        }
+                    ),
+                    "",
+                )
+            output_path = Path(command[command.index("--output-last-message") + 1])
+            output_path.write_text(json.dumps(FINAL_REPORT), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory(prefix="autoreview-codex-fallback-escape.") as tmpdir, mock.patch.object(
+            AUTOREVIEW,
+            "resolve_command",
+            return_value="/usr/bin/codex",
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "codex_auth_config_flags",
+            return_value=[],
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "prepare_codex_runtime_auth",
+            return_value=None,
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "run_with_heartbeat",
+            side_effect=fake_run,
+        ), mock.patch.object(sys, "stderr", stderr):
+            output = AUTOREVIEW.run_codex(args, Path(tmpdir), "review")
+
+        rendered = stderr.getvalue()
+        self.assertEqual(json.loads(output), FINAL_REPORT)
+        self.assertNotIn("\x1b", rendered)
+        self.assertNotIn("\x07", rendered)
+        self.assertNotIn("\n\x1b", rendered)
+        self.assertIn(r"gpt-5.6-sol\x0a\x1b[31m", rendered)
+        self.assertIn(r"gpt-5.6-terra\x07", rendered)
 
     def test_codex_runs_outside_repo_with_bundle_only_workspace(self) -> None:
         args = argparse.Namespace(

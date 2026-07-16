@@ -7642,7 +7642,9 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
                 ):
                     primary_failure = result
                     print(
-                        f"codex model {model} is unavailable for this account; retrying with {models[1]}",
+                        "codex model "
+                        f"{display_escape(model, 500)} is unavailable for this account; "
+                        f"retrying with {display_escape(models[1], 500)}",
                         file=sys.stderr,
                     )
                     continue

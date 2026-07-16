@@ -31,7 +31,7 @@ if ($PSBoundParameters.ContainsKey('Engine')) {
 
 $PyLauncher = Get-Command py -ErrorAction SilentlyContinue
 if ($null -ne $PyLauncher) {
-    & $PyLauncher.Source -3 -c 'import sys; raise SystemExit(sys.version_info[0] != 3)' *> $null
+    & $PyLauncher.Source -3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' *> $null
     if ($LASTEXITCODE -eq 0) {
         & $PyLauncher.Source -3 $Harness @ForwardedArgs
         exit $LASTEXITCODE
@@ -40,12 +40,12 @@ if ($null -ne $PyLauncher) {
 
 $Python = Get-Command python -ErrorAction SilentlyContinue
 if ($null -ne $Python) {
-    & $Python.Source -c 'import sys; raise SystemExit(sys.version_info[0] != 3)' *> $null
+    & $Python.Source -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' *> $null
     if ($LASTEXITCODE -eq 0) {
         & $Python.Source $Harness @ForwardedArgs
         exit $LASTEXITCODE
     }
 }
 
-[Console]::Error.WriteLine('Python 3 is required to run test-review-harness.')
+[Console]::Error.WriteLine('Python 3.9 or newer is required to run test-review-harness.')
 exit 127
