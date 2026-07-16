@@ -602,6 +602,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_diff_suppress_blank_empty_is_forced_off(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
+            git(repo, "config", "core.autocrlf", "false")
             source = repo / "source.txt"
             source.write_text("before\n\nafter\n", encoding="utf-8")
             git(repo, "add", "source.txt")
@@ -3294,6 +3295,46 @@ class AutoreviewHardeningTests(unittest.TestCase):
             content = '{"' + key + '": "' + realistic_secret_value() + '"}'
             with self.subTest(key=key):
                 self.assertTrue(self.helper["secret_text_risk"](content))
+
+    def test_safe_git_reads_ignore_replacement_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            source = repo / "source.txt"
+            source.write_text("original\n", encoding="utf-8")
+            git(repo, "add", "source.txt")
+            git(repo, "commit", "-q", "-m", "original")
+            original = git(repo, "rev-parse", "HEAD").strip()
+            source.write_text("replacement\n", encoding="utf-8")
+            git(repo, "commit", "-qam", "replacement")
+            replacement = git(repo, "rev-parse", "HEAD").strip()
+            git(repo, "replace", original, replacement)
+
+            shown = self.helper["git"](
+                repo,
+                "show",
+                "--format=%s",
+                "--no-patch",
+                original,
+            ).strip()
+            parents = self.helper["git"](
+                repo,
+                "rev-list",
+                "--parents",
+                "-n",
+                "1",
+                original,
+            ).strip()
+
+            self.assertEqual(shown, "original")
+            self.assertEqual(parents, original)
+            self.assertEqual(
+                self.helper["safe_git_env"](repo)["GIT_NO_REPLACE_OBJECTS"],
+                "1",
+            )
+            self.assertEqual(
+                self.helper["codex_tool_git_env"]()["GIT_NO_REPLACE_OBJECTS"],
+                "1",
+            )
 
     def test_secret_like_patch_content_is_blocked_in_all_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
