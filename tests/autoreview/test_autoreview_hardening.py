@@ -4366,6 +4366,45 @@ class AutoreviewHardeningTests(unittest.TestCase):
             )
             self.assertFalse(os.path.samefile(tracked, outside))
 
+    def test_panel_duplicate_findings_keep_strongest_metadata_and_reviewers(
+        self,
+    ) -> None:
+        def report(priority: str, confidence: float, body: str) -> dict[str, object]:
+            return {
+                "findings": [
+                    {
+                        "title": "Same issue",
+                        "body": body,
+                        "priority": priority,
+                        "confidence": confidence,
+                        "category": "bug",
+                        "code_location": {
+                            "file_path": "src/app.py",
+                            "line": 10,
+                        },
+                    }
+                ],
+                "overall_correctness": "patch is incorrect",
+                "overall_explanation": "issue",
+                "overall_confidence": confidence,
+            }
+
+        merged = self.helper["merge_panel_reports"](
+            [
+                ("claude model=fable", report("P3", 0.55, "Claude detail")),
+                ("codex model=sol", report("P0", 0.95, "Codex detail")),
+            ]
+        )
+
+        self.assertEqual(len(merged["findings"]), 1)
+        finding = merged["findings"][0]
+        self.assertEqual(finding["priority"], "P0")
+        self.assertEqual(finding["confidence"], 0.95)
+        self.assertIn("claude model=fable", finding["body"])
+        self.assertIn("codex model=sol", finding["body"])
+        self.assertIn("Claude detail", finding["body"])
+        self.assertIn("Codex detail", finding["body"])
+
     def test_partial_panel_failure_output_is_terminal_escaped(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))

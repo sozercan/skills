@@ -9846,8 +9846,11 @@ def run_reviewer(
 
 
 def merge_panel_reports(reports: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+    priority_rank = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
     findings: list[dict[str, Any]] = []
-    seen: set[tuple[str, int, str, str]] = set()
+    merged_by_key: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+    labels_by_key: dict[tuple[str, int, str, str], list[str]] = {}
+    bodies_by_key: dict[tuple[str, int, str, str], list[tuple[str, str]]] = {}
     for label, report in reports:
         for finding in report["findings"]:
             location = finding["code_location"]
@@ -9857,12 +9860,32 @@ def merge_panel_reports(reports: list[tuple[str, dict[str, Any]]]) -> dict[str, 
                 finding["category"],
                 " ".join(finding["title"].lower().split()),
             )
-            if key in seen:
-                continue
-            seen.add(key)
-            merged = copy.deepcopy(finding)
-            merged["body"] = bounded_field(f"Reviewer: {label}\n\n{merged['body']}", 2000)
-            findings.append(merged)
+            if key not in merged_by_key:
+                merged = copy.deepcopy(finding)
+                merged_by_key[key] = merged
+                labels_by_key[key] = []
+                bodies_by_key[key] = []
+                findings.append(merged)
+            merged = merged_by_key[key]
+            if priority_rank[finding["priority"]] < priority_rank[merged["priority"]]:
+                merged["priority"] = finding["priority"]
+            merged["confidence"] = max(merged["confidence"], finding["confidence"])
+            if label not in labels_by_key[key]:
+                labels_by_key[key].append(label)
+            body = finding["body"]
+            if (label, body) not in bodies_by_key[key]:
+                bodies_by_key[key].append((label, body))
+
+    for key, merged in merged_by_key.items():
+        labels = ", ".join(labels_by_key[key])
+        body_sections = [
+            f"{label}: {body}"
+            for label, body in bodies_by_key[key]
+        ]
+        merged["body"] = bounded_field(
+            f"Reviewers: {labels}\n\n" + "\n\n".join(body_sections),
+            2000,
+        )
     incorrect = bool(findings) or any(report["overall_correctness"] == "patch is incorrect" for _, report in reports)
     summary = ", ".join(f"{label}: {len(report['findings'])} finding(s)" for label, report in reports)
     return {
