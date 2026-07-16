@@ -266,6 +266,54 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
                 Path(resolved).resolve().is_relative_to(repo.resolve())
             )
 
+    def test_harness_fixture_git_ignores_hostile_git_environment(self) -> None:
+        harness_path = SCRIPT_PATH.with_name("test-review-harness.py")
+        namespace = runpy.run_path(str(harness_path))
+        trusted_git = shutil.which("git")
+        if trusted_git is None:
+            self.skipTest("git is not installed")
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = root / "repo"
+            repo.mkdir()
+            redirected_git_dir = root / "redirected.git"
+            hostile_global = root / "hostile.gitconfig"
+            hostile_global.write_text(
+                "[core]\n\tfsmonitor = hostile-fsmonitor\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GIT_CONFIG_GLOBAL": str(hostile_global),
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "core.fsmonitor",
+                    "GIT_CONFIG_VALUE_0": "hostile-fsmonitor",
+                    "GIT_DIR": str(redirected_git_dir),
+                    "GIT_WORK_TREE": str(root / "redirected-worktree"),
+                    "GIT_TEMPLATE_DIR": str(root / "hostile-template"),
+                },
+                clear=False,
+            ):
+                namespace["create_fixture_repo"](
+                    repo,
+                    "benign",
+                    trusted_git,
+                )
+
+            self.assertTrue((repo / ".git").is_dir())
+            self.assertFalse(redirected_git_dir.exists())
+            self.assertEqual(
+                subprocess.run(
+                    [trusted_git, "config", "--get", "core.fsmonitor"],
+                    cwd=repo,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                ).returncode,
+                1,
+            )
+
     def test_cursor_agent_bin_cli_alias(self) -> None:
         with mock.patch.object(
             sys,
