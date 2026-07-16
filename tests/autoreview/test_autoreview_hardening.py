@@ -751,6 +751,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_default_branch_does_not_guess_between_main_and_master(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
+            git(repo, "config", "core.autocrlf", "false")
             (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
             git(repo, "add", "tracked.txt")
             git(repo, "commit", "-q", "-m", "base")
@@ -5108,6 +5109,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_parallel_tests_require_the_committed_target_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
+            git(repo, "config", "core.autocrlf", "false")
             source = repo / "source.txt"
             source.write_text("first\n", encoding="utf-8")
             git(repo, "add", "source.txt")
