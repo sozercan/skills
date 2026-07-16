@@ -184,6 +184,15 @@ If the object is not available locally, fetch the PR base repository/ref into a
 local remote (often named `upstream`) and pass that matching local ref, for
 example `--base upstream/main`. Autoreview does not fetch automatically.
 
+For environment-only authentication, set `GH_HOST` to pin the intended host.
+Use `GH_TOKEN` or `GITHUB_TOKEN` for `github.com` and `*.ghe.com` Enterprise
+Cloud hosts. Use `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` for
+self-hosted GitHub Enterprise Server hosts. `GH_HOST` must be an unqualified
+hostname without a port. The host pin prevents a reviewed
+checkout from redirecting an enterprise token through a repository-controlled
+remote. Config- or keyring-based `gh` authentication continues to work without
+these environment variables.
+
 Committed single change:
 
 ```bash

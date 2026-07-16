@@ -223,11 +223,196 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertNotIn("Write-Error", harness)
         self.assertIn("sys.version_info < (3, 9)", harness)
         self.assertIn("-CommandType Application", harness)
-        self.assertIn("Test-ExternalApplication", harness)
+        self.assertIn("Resolve-CanonicalPath", harness)
+        self.assertIn("Get-ExternalApplicationPath", harness)
+        self.assertIn("$Resolution.Traversed", harness)
+        self.assertIn("Split-PathComponents", harness)
+        self.assertIn("Get-LinkTargetText", harness)
+        self.assertIn("$Targets = @($Item.Target)", harness)
+        self.assertIn("$LinkHops -gt 128", harness)
+        self.assertNotIn("$SeenLinks", harness)
+        self.assertIn("$SeparatorText.ToCharArray()", harness)
+        self.assertNotIn("-split '[\\\\/]+'", harness)
+        self.assertIn(
+            "if ($null -ne $Parent) { $Current = $Parent.FullName }",
+            harness,
+        )
+        self.assertIn("$TargetText -notmatch", harness)
+        self.assertIn("$TargetText -match '^[\\\\/]{2}[?.][\\\\/]'", harness)
+        self.assertIn("GetFinalPathNameByHandle", harness)
+        self.assertIn("IoReparseTagAppExecLink", harness)
+        self.assertIn("IsAppExecutionAlias", harness)
+        self.assertIn("Get-FilesystemIdentityPath", harness)
+        self.assertIn("$Traversed.Add($RootIdentity)", harness)
+        self.assertIn("$Traversed.Add($TargetRootIdentity)", harness)
+        self.assertIn("unable to canonicalize reviewed checkout root", harness)
+        self.assertNotIn("result.Substring(4)", harness)
+        self.assertIn("return $Lexical", harness)
         self.assertIn("$LASTEXITCODE -eq 0", harness)
         self.assertIn("exit 127", harness)
         for disabled_engine in ("droid", "copilot", "opencode", "cursor"):
             self.assertNotIn(f"'{disabled_engine}'", harness)
+
+    def test_powershell_harness_rejects_linked_checkout_python_paths(self) -> None:
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        if powershell is None:
+            self.skipTest("PowerShell is not installed")
+        repo_root = SCRIPT.parents[3]
+        trusted_python = Path(sys.executable).resolve()
+        if trusted_python.is_relative_to(repo_root.resolve()):
+            self.skipTest("no Python interpreter outside the reviewed checkout")
+        with tempfile.TemporaryDirectory(
+            prefix=".autoreview-ps-",
+            dir=repo_root,
+        ) as checkout_tempdir, tempfile.TemporaryDirectory() as external_tempdir:
+            checkout_bin = Path(checkout_tempdir)
+            python_link = checkout_bin / (
+                "python.exe" if os.name == "nt" else "python"
+            )
+            try:
+                python_link.symlink_to(trusted_python)
+            except OSError as exc:
+                self.skipTest(f"file symlinks are unavailable: {exc}")
+            external_root = Path(external_tempdir)
+            external_link = external_root / "linked-bin"
+            try:
+                external_link.symlink_to(checkout_bin, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"directory symlinks are unavailable: {exc}")
+            external_python_dir = external_root / "external-python"
+            external_python_dir.mkdir()
+            external_python = external_python_dir / python_link.name
+            external_python.symlink_to(trusted_python)
+            checkout_hop = checkout_bin / "checkout-hop"
+            checkout_hop.symlink_to(external_python_dir, target_is_directory=True)
+            chained_link = external_root / "chained-bin"
+            chained_link.symlink_to(checkout_hop, target_is_directory=True)
+            repeated_link = external_python_dir / "repeat"
+            repeated_link.symlink_to(".", target_is_directory=True)
+            parent_chain = external_root / "parent-chain"
+            parent_chain.mkdir()
+            checkout_subdir = checkout_bin / "subdir"
+            checkout_safe = checkout_bin / "safe"
+            checkout_subdir.mkdir()
+            checkout_safe.mkdir()
+            (checkout_safe / python_link.name).symlink_to(
+                trusted_python
+            )
+            (parent_chain / "hop").symlink_to(
+                checkout_subdir,
+                target_is_directory=True,
+            )
+            external_safe = parent_chain / "safe"
+            external_safe.mkdir()
+            (external_safe / python_link.name).symlink_to(
+                trusted_python
+            )
+            (parent_chain / python_link.name).symlink_to(
+                str(Path("hop") / ".." / "safe" / python_link.name)
+            )
+
+            for candidate_dir in (
+                checkout_bin,
+                external_link,
+                chained_link,
+                parent_chain,
+            ):
+                with self.subTest(candidate_dir=candidate_dir):
+                    env = os.environ.copy()
+                    env["PATH"] = str(candidate_dir)
+                    result = subprocess.run(
+                        [
+                            powershell,
+                            "-NoLogo",
+                            "-NoProfile",
+                            "-File",
+                            str(SCRIPT.with_name("test-review-harness.ps1")),
+                            "-Help",
+                        ],
+                        cwd=repo_root,
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+
+                    self.assertEqual(result.returncode, 127, result.stderr)
+                    self.assertIn(
+                        "Python 3.9 or newer outside the reviewed checkout is required",
+                        result.stderr,
+                    )
+
+            if os.name == "nt" and (subst := shutil.which("subst")) is not None:
+                drive = next(
+                    (
+                        f"{letter}:"
+                        for letter in reversed("DEFGHIJKLMNOPQRSTUVWXYZ")
+                        if not Path(f"{letter}:\\").exists()
+                    ),
+                    None,
+                )
+                if drive is not None:
+                    mounted = subprocess.run(
+                        [subst, drive, str(repo_root)],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(mounted.returncode, 0, mounted.stderr)
+                    try:
+                        alias_dir = Path(f"{drive}\\") / checkout_bin.relative_to(
+                            repo_root
+                        )
+                        alias_env = os.environ.copy()
+                        alias_env["PATH"] = str(alias_dir)
+                        alias_result = subprocess.run(
+                            [
+                                powershell,
+                                "-NoLogo",
+                                "-NoProfile",
+                                "-File",
+                                str(SCRIPT.with_name("test-review-harness.ps1")),
+                                "-Help",
+                            ],
+                            cwd=repo_root,
+                            env=alias_env,
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                        )
+                        self.assertEqual(
+                            alias_result.returncode,
+                            127,
+                            alias_result.stderr,
+                        )
+                    finally:
+                        subprocess.run(
+                            [subst, drive, "/D"],
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                        )
+
+            valid_repeated_path = repeated_link / "repeat"
+            valid_env = os.environ.copy()
+            valid_env["PATH"] = str(valid_repeated_path)
+            valid_result = subprocess.run(
+                [
+                    powershell,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-File",
+                    str(SCRIPT.with_name("test-review-harness.ps1")),
+                    "-Help",
+                ],
+                cwd=repo_root,
+                env=valid_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(valid_result.returncode, 0, valid_result.stderr)
+            self.assertIn("usage: test-review-harness", valid_result.stdout)
 
     def test_local_bundle_blocks_sensitive_untracked_file(self) -> None:
         for rel in (".env", "tokens/session.dat", "secrets/local.py"):
@@ -593,6 +778,201 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 {"PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")},
             ), self.assertRaisesRegex(SystemExit, "not available locally"):
                 self.helper["detect_pr_base"](repo)
+
+    @unittest.skipIf(os.name == "nt", "POSIX fake executables")
+    def test_detect_pr_base_sanitizes_external_gh_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            base_oid = git(repo, "rev-parse", "HEAD").strip()
+            repo_bin = repo / "bin"
+            repo_bin.mkdir()
+            trusted_bin = root / "trusted"
+            trusted_bin.mkdir()
+            config_dir = root / "gh-config"
+            config_dir.mkdir()
+            home = root / "home"
+            home.mkdir()
+            (home / ".gitconfig").write_text(
+                "[user]\n\tname = Trusted User\n",
+                encoding="utf-8",
+            )
+            marker = root / "repo-git-invoked"
+            env_record = root / "gh-env"
+            self.helper["write_executable"](
+                repo_bin / "git",
+                "#!/bin/sh\nprintf invoked > '"
+                + str(marker).replace("'", "'\"'\"'")
+                + "'\nexit 99\n",
+            )
+            self.helper["write_executable"](
+                trusted_bin / "gh",
+                "#!/bin/sh\n"
+                "printf '%s\n' \"$PATH\" \"$GIT_CONFIG_GLOBAL\" \"$GH_TOKEN\" \"${GH_CONFIG_DIR-}\" \"${GH_HOST-}\" \"${GH_ENTERPRISE_TOKEN-}\" > '"
+                + str(env_record).replace("'", "'\"'\"'")
+                + "'\n"
+                "test \"$(git config --global --get user.name)\" = 'Trusted User' || exit 97\n"
+                "git --version >/dev/null 2>&1 || exit 98\n"
+                "printf '%s\n' '"
+                + base_oid
+                + "'\n",
+            )
+            original_path = os.environ.get("PATH", "")
+            hostile_global = repo / "hostile-gitconfig"
+            hostile_global.write_text("[core]\n\tfsmonitor = hostile\n", encoding="utf-8")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "PATH": os.pathsep.join(
+                        (str(repo_bin), str(trusted_bin), original_path)
+                    ),
+                    "GH_TOKEN": "test-token-placeholder",
+                    "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
+                    "GH_HOST": "github.enterprise.example",
+                    "GH_CONFIG_DIR": str(config_dir),
+                    "HOME": str(home),
+                    "GIT_CONFIG_GLOBAL": str(hostile_global),
+                    "GIT_DIR": str(repo / "attacker-git-dir"),
+                },
+                clear=False,
+            ):
+                gh_env = self.helper["safe_gh_env"](repo)
+                self.assertEqual(
+                    self.helper["detect_pr_base"](repo),
+                    base_oid,
+                )
+
+            self.assertFalse(marker.exists())
+            self.assertNotIn(str(repo_bin.resolve()), gh_env["PATH"].split(os.pathsep))
+            self.assertNotIn("GIT_CONFIG_GLOBAL", gh_env)
+            self.assertNotIn("GIT_DIR", gh_env)
+            self.assertEqual(gh_env["GH_TOKEN"], "test-token-placeholder")
+            self.assertEqual(gh_env["GH_HOST"], "github.enterprise.example")
+            self.assertEqual(
+                gh_env["GH_ENTERPRISE_TOKEN"],
+                "test-token-placeholder",
+            )
+            self.assertEqual(gh_env["GH_CONFIG_DIR"], str(config_dir.resolve()))
+            (
+                recorded_path,
+                global_config,
+                token,
+                recorded_config,
+                recorded_host,
+                enterprise_token,
+            ) = env_record.read_text(encoding="utf-8").splitlines()
+            self.assertNotIn(str(repo_bin.resolve()), recorded_path.split(os.pathsep))
+            self.assertEqual(global_config, "")
+            self.assertEqual(token, "test-token-placeholder")
+            self.assertEqual(recorded_config, str(config_dir.resolve()))
+            self.assertEqual(recorded_host, "github.enterprise.example")
+            self.assertEqual(enterprise_token, "test-token-placeholder")
+
+    def test_safe_gh_env_requires_valid_host_for_enterprise_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GH_HOST": "",
+                    "GH_TOKEN": "",
+                    "GITHUB_TOKEN": "",
+                    "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
+                },
+                clear=False,
+            ), self.assertRaisesRegex(SystemExit, "GH_HOST is required"):
+                self.helper["safe_gh_env"](repo)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GH_HOST": "",
+                    "GH_TOKEN": "test-token-placeholder",
+                    "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
+                },
+                clear=False,
+            ), self.assertRaisesRegex(SystemExit, "GH_HOST is required"):
+                self.helper["safe_gh_env"](repo)
+            for host in (
+                "https://attacker.example/path",
+                "user@attacker.example",
+                "github.enterprise.example:8443",
+            ):
+                with self.subTest(host=host), mock.patch.dict(
+                    os.environ,
+                    {
+                        "GH_HOST": host,
+                        "GH_TOKEN": "",
+                        "GITHUB_TOKEN": "",
+                        "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
+                    },
+                    clear=False,
+                ), self.assertRaisesRegex(SystemExit, "invalid GH_HOST"):
+                    self.helper["safe_gh_env"](repo)
+
+    def test_safe_gh_env_preserves_explicit_github_host_pin(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir, mock.patch.dict(
+            os.environ,
+            {
+                "GH_HOST": "GitHub.com",
+                "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
+            },
+            clear=False,
+        ):
+            env = self.helper["safe_gh_env"](init_repo(Path(tempdir)))
+
+        self.assertEqual(env["GH_HOST"], "github.com")
+        self.assertNotIn("GH_ENTERPRISE_TOKEN", env)
+
+    def test_safe_gh_env_uses_dotcom_token_for_ghe_cloud(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir, mock.patch.dict(
+            os.environ,
+            {
+                "GH_HOST": "tenant.ghe.com",
+                "GH_TOKEN": "test-token-placeholder",
+                "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
+            },
+            clear=False,
+        ):
+            env = self.helper["safe_gh_env"](init_repo(Path(tempdir)))
+
+        self.assertEqual(env["GH_HOST"], "tenant.ghe.com")
+        self.assertEqual(env["GH_TOKEN"], "test-token-placeholder")
+        self.assertNotIn("GH_ENTERPRISE_TOKEN", env)
+
+
+    def test_detect_pr_base_invokes_validated_absolute_gh_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            base_oid = git(repo, "rev-parse", "HEAD").strip()
+            gh_path = root / "trusted" / ("gh.exe" if os.name == "nt" else "gh")
+            run_mock = mock.Mock(
+                return_value=subprocess.CompletedProcess(
+                    [],
+                    0,
+                    base_oid + "\n",
+                    "",
+                )
+            )
+            with mock.patch.dict(
+                self.helper["detect_pr_base"].__globals__,
+                {
+                    "find_command": lambda _name, _repo: str(gh_path),
+                    "run": run_mock,
+                },
+            ):
+                self.assertEqual(self.helper["detect_pr_base"](repo), base_oid)
+
+            command = run_mock.call_args.args[0]
+            self.assertEqual(command[0], str(gh_path))
+            self.assertTrue(Path(command[0]).is_absolute())
+            self.assertFalse(Path(command[0]).is_relative_to(repo))
 
     def test_dirty_check_respects_trusted_global_excludes(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

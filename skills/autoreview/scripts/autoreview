@@ -1369,6 +1369,87 @@ def safe_engine_env(
     return env
 
 
+def safe_gh_env(repo: Path) -> dict[str, str]:
+    env = safe_engine_env(repo)
+    env.update(
+        {
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GH_PROMPT_DISABLED": "1",
+        }
+    )
+    for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    for key in (
+        "GH_CONFIG_DIR",
+        "XDG_CONFIG_HOME",
+        "APPDATA",
+        "LOCALAPPDATA",
+    ):
+        value = os.environ.get(key)
+        normalized = (
+            normalize_external_env_path_value(repo, key, value)
+            if value
+            else None
+        )
+        if normalized:
+            env[key] = normalized
+
+    raw_host = os.environ.get("GH_HOST", "")
+    explicit_host = normalized_gh_host(raw_host)
+    if raw_host and explicit_host is None:
+        raise SystemExit(
+            "invalid GH_HOST; use a hostname with no port, scheme, "
+            "credentials, path, query, or fragment"
+        )
+    if explicit_host:
+        env["GH_HOST"] = explicit_host
+        if not gh_host_uses_dotcom_token(explicit_host):
+            for key in ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+                value = os.environ.get(key)
+                if value:
+                    env[key] = value
+    elif any(
+        os.environ.get(key)
+        for key in ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+    ):
+        raise SystemExit(
+            "GH_HOST is required when gh authentication uses "
+            "GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN; pin the trusted "
+            "GitHub Enterprise host or pass --base explicitly"
+        )
+    return env
+
+
+def normalized_gh_host(value: str) -> str | None:
+    if not value or any(char.isspace() or ord(char) < 0x20 for char in value):
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(f"//{value}")
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.hostname is None
+        or port is not None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    return value.lower()
+
+
+def gh_host_uses_dotcom_token(host: str) -> bool:
+    parsed = urllib.parse.urlsplit(f"//{host}")
+    hostname = (parsed.hostname or "").lower()
+    return hostname == "github.com" or hostname.endswith(".ghe.com")
+
+
 def quote_java_tool_option(option: str) -> str:
     if any(char in option for char in ("\0", "\r", "\n")):
         raise SystemExit("parallel test home contains unsupported control characters")
@@ -2059,6 +2140,8 @@ def choose_target(
 
 
 def detect_pr_base(repo: Path) -> str | None:
+    # find_command returns a validated absolute path. Keep argv[0] absolute:
+    # Windows subprocess lookup does not consult PATH from the child env.
     gh_bin = find_command("gh", repo)
     if not gh_bin:
         return None
@@ -2074,6 +2157,7 @@ def detect_pr_base(repo: Path) -> str | None:
         ],
         repo,
         check=False,
+        env=safe_gh_env(repo),
     )
     base_oid = result.stdout.strip()
     if result.returncode != 0 or not base_oid:
