@@ -874,6 +874,13 @@ class AutoreviewHardeningTests(unittest.TestCase):
             (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
             git(repo, "add", "tracked.txt")
             git(repo, "commit", "-q", "-m", "base")
+            git(
+                repo,
+                "remote",
+                "add",
+                "origin",
+                "git@github.enterprise.example:owner/repo.git",
+            )
             base_oid = git(repo, "rev-parse", "HEAD").strip()
             repo_bin = repo / "bin"
             repo_bin.mkdir()
@@ -936,7 +943,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
             self.assertNotIn(str(repo_bin.resolve()), gh_env["PATH"].split(os.pathsep))
             self.assertNotIn("GIT_CONFIG_GLOBAL", gh_env)
             self.assertNotIn("GIT_DIR", gh_env)
-            self.assertEqual(gh_env["GH_TOKEN"], "test-token-placeholder")
+            self.assertNotIn("GH_TOKEN", gh_env)
             self.assertEqual(gh_env["GH_HOST"], "github.enterprise.example")
             self.assertEqual(
                 gh_env["GH_ENTERPRISE_TOKEN"],
@@ -953,7 +960,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
             ) = env_record.read_text(encoding="utf-8").splitlines()
             self.assertNotIn(str(repo_bin.resolve()), recorded_path.split(os.pathsep))
             self.assertEqual(global_config, "")
-            self.assertEqual(token, "test-token-placeholder")
+            self.assertEqual(token, "")
             self.assertEqual(recorded_config, str(config_dir.resolve()))
             self.assertEqual(recorded_host, "github.enterprise.example")
             self.assertEqual(enterprise_token, "test-token-placeholder")
@@ -968,6 +975,17 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     "GH_TOKEN": "",
                     "GITHUB_TOKEN": "",
                     "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
+                },
+                clear=False,
+            ), self.assertRaisesRegex(SystemExit, "GH_HOST is required"):
+                self.helper["safe_gh_env"](repo)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GH_HOST": "",
+                    "GH_TOKEN": "test-token-placeholder",
+                    "GH_ENTERPRISE_TOKEN": "",
+                    "GITHUB_ENTERPRISE_TOKEN": "",
                 },
                 clear=False,
             ), self.assertRaisesRegex(SystemExit, "GH_HOST is required"):
@@ -1014,20 +1032,60 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertNotIn("GH_ENTERPRISE_TOKEN", env)
 
     def test_safe_gh_env_uses_dotcom_token_for_ghe_cloud(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir, mock.patch.dict(
-            os.environ,
-            {
-                "GH_HOST": "tenant.ghe.com",
-                "GH_TOKEN": "test-token-placeholder",
-                "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
-            },
-            clear=False,
-        ):
-            env = self.helper["safe_gh_env"](init_repo(Path(tempdir)))
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            git(repo, "remote", "add", "origin", "https://tenant.ghe.com/o/r.git")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GH_HOST": "tenant.ghe.com",
+                    "GH_TOKEN": "test-token-placeholder",
+                    "GH_ENTERPRISE_TOKEN": "test-token-placeholder",
+                },
+                clear=False,
+            ):
+                env = self.helper["safe_gh_env"](repo)
 
         self.assertEqual(env["GH_HOST"], "tenant.ghe.com")
         self.assertEqual(env["GH_TOKEN"], "test-token-placeholder")
         self.assertNotIn("GH_ENTERPRISE_TOKEN", env)
+
+    def test_safe_gh_env_rejects_token_host_remote_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            git(repo, "remote", "add", "origin", "https://attacker.ghe.com/o/r.git")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GH_HOST": "trusted.ghe.com",
+                    "GH_TOKEN": "test-token-placeholder",
+                },
+                clear=False,
+            ), self.assertRaisesRegex(SystemExit, "must match every repository remote"):
+                self.helper["safe_gh_env"](repo)
+
+    def test_safe_gh_env_rejects_token_host_push_url_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            git(repo, "remote", "add", "origin", "https://trusted.ghe.com/o/r.git")
+            git(
+                repo,
+                "remote",
+                "set-url",
+                "--add",
+                "--push",
+                "origin",
+                "https://attacker.ghe.com/o/r.git",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GH_HOST": "trusted.ghe.com",
+                    "GH_TOKEN": "test-token-placeholder",
+                },
+                clear=False,
+            ), self.assertRaisesRegex(SystemExit, "must match every repository remote"):
+                self.helper["safe_gh_env"](repo)
 
 
     def test_detect_pr_base_invokes_validated_absolute_gh_path(self) -> None:

@@ -1378,10 +1378,6 @@ def safe_gh_env(repo: Path) -> dict[str, str]:
             "GH_PROMPT_DISABLED": "1",
         }
     )
-    for key in ("GH_TOKEN", "GITHUB_TOKEN"):
-        value = os.environ.get(key)
-        if value:
-            env[key] = value
     for key in (
         "GH_CONFIG_DIR",
         "XDG_CONFIG_HOME",
@@ -1404,22 +1400,40 @@ def safe_gh_env(repo: Path) -> dict[str, str]:
             "invalid GH_HOST; use a hostname with no port, scheme, "
             "credentials, path, query, or fragment"
         )
+    token_keys = (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+    )
+    if explicit_host is None and any(os.environ.get(key) for key in token_keys):
+        raise SystemExit(
+            "GH_HOST is required when gh authentication uses environment "
+            "tokens; pin the trusted GitHub host or pass --base explicitly"
+        )
     if explicit_host:
         env["GH_HOST"] = explicit_host
-        if not gh_host_uses_dotcom_token(explicit_host):
-            for key in ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
-                value = os.environ.get(key)
-                if value:
-                    env[key] = value
-    elif any(
-        os.environ.get(key)
-        for key in ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
-    ):
-        raise SystemExit(
-            "GH_HOST is required when gh authentication uses "
-            "GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN; pin the trusted "
-            "GitHub Enterprise host or pass --base explicitly"
+        selected_keys = (
+            ("GH_TOKEN", "GITHUB_TOKEN")
+            if gh_host_uses_dotcom_token(explicit_host)
+            else ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
         )
+        selected_tokens = {
+            key: value
+            for key in selected_keys
+            if (value := os.environ.get(key))
+        }
+        if selected_tokens:
+            remote_hosts = repository_remote_hosts(repo, env)
+            if remote_hosts != {explicit_host}:
+                rendered = ", ".join(sorted(remote_hosts or set())) or "none"
+                raise SystemExit(
+                    "GH_HOST must match every repository remote before gh "
+                    "environment tokens can be forwarded; "
+                    f"GH_HOST={explicit_host}, remote hosts={rendered}. "
+                    "Align the remotes or pass --base explicitly"
+                )
+        env.update(selected_tokens)
     return env
 
 
@@ -1441,13 +1455,79 @@ def normalized_gh_host(value: str) -> str | None:
         or parsed.fragment
     ):
         return None
-    return value.lower()
+    hostname = parsed.hostname.lower()
+    return hostname if ":" not in hostname else None
 
 
 def gh_host_uses_dotcom_token(host: str) -> bool:
     parsed = urllib.parse.urlsplit(f"//{host}")
     hostname = (parsed.hostname or "").lower()
     return hostname == "github.com" or hostname.endswith(".ghe.com")
+
+
+def git_remote_host(remote_url: str) -> str | None:
+    if not remote_url or any(char in remote_url for char in ("\0", "\r", "\n")):
+        return None
+    if "://" in remote_url:
+        try:
+            parsed = urllib.parse.urlsplit(remote_url)
+        except ValueError:
+            return None
+        hostname = parsed.hostname
+        return hostname.lower() if hostname and ":" not in hostname else None
+    match = re.fullmatch(
+        r"(?:[^@/:]+@)?(?P<host>[A-Za-z0-9._-]+):[^?#]+",
+        remote_url,
+    )
+    return match.group("host").lower() if match else None
+
+
+def repository_remote_hosts(
+    repo: Path,
+    env: dict[str, str],
+) -> set[str] | None:
+    git_bin = resolve_command("git", repo)
+    base_command = [git_bin, "--no-optional-locks", *SAFE_GIT_CONFIG_ARGS]
+    remotes_result = run(
+        [*base_command, "remote"],
+        repo,
+        check=False,
+        env=env,
+    )
+    if remotes_result.returncode != 0:
+        return None
+    remotes = [remote for remote in remotes_result.stdout.splitlines() if remote]
+    if not remotes:
+        return None
+    hosts: set[str] = set()
+    for remote in remotes:
+        if any(char in remote for char in ("\0", "\r", "\n")):
+            return None
+        for url_options in (("--all",), ("--push", "--all")):
+            urls_result = run(
+                [
+                    *base_command,
+                    "remote",
+                    "get-url",
+                    *url_options,
+                    "--",
+                    remote,
+                ],
+                repo,
+                check=False,
+                env=env,
+            )
+            if urls_result.returncode != 0:
+                return None
+            urls = [url for url in urls_result.stdout.splitlines() if url]
+            if not urls:
+                return None
+            for remote_url in urls:
+                host = git_remote_host(remote_url)
+                if host is None:
+                    return None
+                hosts.add(host)
+    return hosts
 
 
 def quote_java_tool_option(option: str) -> str:
