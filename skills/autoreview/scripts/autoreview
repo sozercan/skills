@@ -6585,6 +6585,7 @@ def review_input_snapshot(
     require_refs: bool = True,
 ) -> object:
     if target == "local":
+        require_visible_local_index(repo)
         return ("local", source_tree_snapshot(repo))
     if target == "branch":
         assert target_ref is not None
@@ -6614,11 +6615,57 @@ def review_input_snapshot(
     )
 
 
+def branch_attribute_source(repo: Path, base_ref: str, head_ref: str) -> str:
+    merge_base = git(
+        repo,
+        "merge-base",
+        "--all",
+        "--end-of-options",
+        base_ref,
+        head_ref,
+    ).splitlines()
+    if len(merge_base) != 1:
+        raise SystemExit(
+            "branch review requires exactly one merge base to pin Git attributes"
+        )
+    return validate_git_ref(repo, merge_base[0], "branch merge base")
+
+
+def commit_attribute_source(repo: Path, commit_ref: str) -> str:
+    parents = git(repo, "rev-list", "--parents", "-n", "1", commit_ref).split()
+    if len(parents) > 2:
+        raise SystemExit(
+            "commit review does not accept merge commits; review the branch diff "
+            "or an individual parent-relative commit instead"
+        )
+    if len(parents) == 2:
+        return validate_git_ref(repo, parents[1], "commit parent")
+    tree_paths = git_path_list(
+        repo,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "-z",
+        "--end-of-options",
+        commit_ref,
+    )
+    if any(PurePosixPath(path).name == ".gitattributes" for path in tree_paths):
+        raise SystemExit(
+            "root commit review cannot safely use target-controlled .gitattributes; "
+            "review from a trusted empty base or remove the attributes first"
+        )
+    return commit_ref
+
+
 def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
     base_ref = validate_git_ref(repo, base_ref, "base")
-    diff_range = f"{base_ref}...HEAD"
+    head_ref = validate_git_ref(repo, "HEAD", "branch HEAD")
+    attr_source = branch_attribute_source(repo, base_ref, head_ref)
+    attr_args = ["-c", f"attr.tree={attr_source}"]
+    diff_range = f"{base_ref}...{head_ref}"
     branch_patch = git(
         repo,
+        *attr_args,
         "diff",
         *SAFE_DIFF_FLAGS,
         "--patch",
@@ -6627,6 +6674,7 @@ def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
     )
     branch_paths = git_path_list(
         repo,
+        *attr_args,
         "diff",
         *SAFE_DIFF_FLAGS,
         "--name-only",
@@ -6640,6 +6688,7 @@ def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
         "branch diff",
         git(
             repo,
+            *attr_args,
             "diff",
             *SAFE_DIFF_FLAGS,
             "--numstat",
@@ -6652,6 +6701,7 @@ def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
         "branch diff",
         git(
             repo,
+            *attr_args,
             "diff",
             *SAFE_DIFF_FLAGS,
             "--raw",
@@ -6667,6 +6717,7 @@ def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
             f"base: {base_ref}",
             git(
                 repo,
+                *attr_args,
                 "diff",
                 *SAFE_DIFF_FLAGS,
                 "--stat",
@@ -6680,14 +6731,11 @@ def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
 
 def commit_bundle(repo: Path, commit_ref: str) -> tuple[str, bool]:
     commit_ref = validate_git_ref(repo, commit_ref, "commit")
-    parents = git(repo, "rev-list", "--parents", "-n", "1", commit_ref).split()
-    if len(parents) > 2:
-        raise SystemExit(
-            "commit review does not accept merge commits; review the branch diff "
-            "or an individual parent-relative commit instead"
-        )
+    attr_source = commit_attribute_source(repo, commit_ref)
+    attr_args = ["-c", f"attr.tree={attr_source}"]
     commit_patch = git(
         repo,
+        *attr_args,
         "show",
         *SAFE_DIFF_FLAGS,
         "--patch",
@@ -6697,6 +6745,7 @@ def commit_bundle(repo: Path, commit_ref: str) -> tuple[str, bool]:
     )
     commit_paths = git_path_list(
         repo,
+        *attr_args,
         "show",
         *SAFE_DIFF_FLAGS,
         "--name-only",
@@ -6709,6 +6758,7 @@ def commit_bundle(repo: Path, commit_ref: str) -> tuple[str, bool]:
         "commit diff",
         git(
             repo,
+            *attr_args,
             "show",
             *SAFE_DIFF_FLAGS,
             "--numstat",
@@ -6722,6 +6772,7 @@ def commit_bundle(repo: Path, commit_ref: str) -> tuple[str, bool]:
         "commit diff",
         git(
             repo,
+            *attr_args,
             "show",
             *SAFE_DIFF_FLAGS,
             "--raw",
@@ -6738,6 +6789,7 @@ def commit_bundle(repo: Path, commit_ref: str) -> tuple[str, bool]:
             f"commit: {commit_ref}",
             git(
                 repo,
+                *attr_args,
                 "show",
                 *SAFE_DIFF_FLAGS,
                 "--stat",
@@ -6759,22 +6811,29 @@ def review_paths(repo: Path, target: str, target_ref: str | None, commit_ref: st
     elif target == "branch":
         assert target_ref
         target_ref = validate_git_ref(repo, target_ref, "base")
+        head_ref = validate_git_ref(repo, "HEAD", "branch HEAD")
+        attr_source = branch_attribute_source(repo, target_ref, head_ref)
         names.update(
             git_path_list(
                 repo,
+                "-c",
+                f"attr.tree={attr_source}",
                 "diff",
                 *SAFE_DIFF_FLAGS,
                 "--name-only",
                 "-z",
                 "--end-of-options",
-                f"{target_ref}...HEAD",
+                f"{target_ref}...{head_ref}",
             )
         )
     else:
         commit_ref = validate_git_ref(repo, commit_ref, "commit")
+        attr_source = commit_attribute_source(repo, commit_ref)
         names.update(
             git_path_list(
                 repo,
+                "-c",
+                f"attr.tree={attr_source}",
                 "show",
                 *SAFE_DIFF_FLAGS,
                 "--name-only",
@@ -10759,6 +10818,9 @@ def main() -> int:
             label += " chunked"
     finally:
         tests_status = finish_parallel_tests(*tests_proc) if tests_proc else 0
+
+    if args.parallel_tests:
+        validate_parallel_test_target(repo, target, args.commit)
 
     if review_input_snapshot(
         repo, target, target_ref, args.commit, require_refs=False

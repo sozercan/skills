@@ -144,6 +144,11 @@ $AUTOREVIEW = Join-Path $AgentsHome "skills\autoreview\scripts\autoreview"
 $AUTOREVIEW_HARNESS = Join-Path $AgentsHome "skills\autoreview\scripts\test-review-harness.ps1"
 ```
 
+`$AUTOREVIEW` is Python source rather than a native Windows executable. Invoke
+it with `python -I $AUTOREVIEW ...`; do not use PowerShell's call operator
+directly on the extensionless file. `$AUTOREVIEW_HARNESS` is a PowerShell
+launcher and should be invoked with `& $AUTOREVIEW_HARNESS ...`.
+
 ## Pick Target
 
 Dirty local work:

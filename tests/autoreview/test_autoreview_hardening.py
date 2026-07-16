@@ -3335,6 +3335,42 @@ class AutoreviewHardeningTests(unittest.TestCase):
             self.assertIn("+++ b/src/runtime.ts", bundle)
             self.assertFalse(truncated)
 
+    def test_committed_bundles_pin_attributes_to_reviewed_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            git(repo, "config", "core.autocrlf", "false")
+            source = repo / "file.txt"
+            source.write_text("before\n", encoding="utf-8")
+            git(repo, "add", "file.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            base = git(repo, "rev-parse", "HEAD").strip()
+            source.write_text("after\n", encoding="utf-8")
+            (repo / ".gitattributes").write_text(
+                "file.txt -diff\n",
+                encoding="utf-8",
+            )
+            git(repo, "add", "file.txt", ".gitattributes")
+            git(repo, "commit", "-q", "-m", "change with attributes")
+            (repo / ".gitattributes").write_text(
+                "* -diff\n",
+                encoding="utf-8",
+            )
+
+            commit_bundle, commit_truncated = self.helper["commit_bundle"](
+                repo,
+                "HEAD",
+            )
+            branch_bundle, branch_truncated = self.helper["branch_bundle"](
+                repo,
+                base,
+            )
+
+            self.assertFalse(commit_truncated)
+            self.assertFalse(branch_truncated)
+            for bundle in (commit_bundle, branch_bundle):
+                self.assertIn("-before", bundle)
+                self.assertIn("+after", bundle)
+
     def test_review_patch_scans_rename_sides_with_their_own_file_types(self) -> None:
         property_name = "pass" + "word"
         reference = "context.driverPass" + "word"
@@ -5218,6 +5254,12 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 "HEAD",
             )
             source.write_text("local review\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "requires a clean checkout"):
+                self.helper["validate_parallel_test_target"](
+                    repo,
+                    "branch",
+                    "HEAD",
+                )
             self.helper["validate_parallel_test_target"](
                 repo,
                 "local",
