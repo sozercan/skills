@@ -9544,13 +9544,15 @@ def reviewer_args(args: argparse.Namespace) -> list[argparse.Namespace]:
 
 
 def reviewer_label(args: argparse.Namespace) -> str:
-    parts = [args.engine]
+    parts = [display_escape(args.engine, 100)]
     if args.model:
-        parts.append(f"model={args.model}")
+        parts.append(f"model={display_escape(args.model, 500)}")
     if getattr(args, "fallback_model", None):
-        parts.append(f"fallback={args.fallback_model}")
+        parts.append(
+            f"fallback={display_escape(args.fallback_model, 500)}"
+        )
     if args.thinking:
-        parts.append(f"thinking={args.thinking}")
+        parts.append(f"thinking={display_escape(args.thinking, 100)}")
     return " ".join(parts)
 
 
@@ -10146,9 +10148,12 @@ def main() -> int:
     if len(reviewers) == 1 and not args.reviewers and not args.panel:
         print(f"engine: {reviewers[0].engine}")
         if reviewers[0].model:
-            print(f"model: {reviewers[0].model}")
+            print(f"model: {display_escape(reviewers[0].model, 500)}")
         if getattr(reviewers[0], "fallback_model", None):
-            print(f"fallback_model: {reviewers[0].fallback_model}")
+            print(
+                "fallback_model: "
+                f"{display_escape(reviewers[0].fallback_model, 500)}"
+            )
         if reviewers[0].thinking:
             print(f"thinking: {reviewers[0].thinking}")
         if reviewers[0].engine == "codex":
@@ -10159,7 +10164,10 @@ def main() -> int:
             if speed:
                 print(f"codex_speed: {speed}")
     else:
-        print(f"reviewers: {', '.join(reviewer_label(reviewer) for reviewer in reviewers)}")
+        print(
+            "reviewers: "
+            + ", ".join(reviewer_label(reviewer) for reviewer in reviewers)
+        )
     tool_states = {reviewer.tools for reviewer in reviewers}
     tools_label = "mixed" if len(tool_states) > 1 else ("on" if tool_states.pop() else "off")
     print(f"tools: {tools_label}")

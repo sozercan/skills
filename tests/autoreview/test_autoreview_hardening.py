@@ -117,6 +117,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertIn("[ValidateSet('codex', 'claude', 'pi')]", harness)
         self.assertIn("[Console]::Error.WriteLine", harness)
         self.assertNotIn("Write-Error", harness)
+        self.assertIn("sys.version_info[0] != 3", harness)
+        self.assertIn("$LASTEXITCODE -eq 0", harness)
         self.assertIn("exit 127", harness)
         for disabled_engine in ("droid", "copilot", "opencode", "cursor"):
             self.assertNotIn(f"'{disabled_engine}'", harness)

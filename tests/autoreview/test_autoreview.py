@@ -138,6 +138,22 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             namespace["parse_args"](["--engine", "cursor"])
 
+    def test_reviewer_label_escapes_terminal_controls(self) -> None:
+        label = AUTOREVIEW.reviewer_label(
+            argparse.Namespace(
+                engine="codex",
+                model="model\n\x1b[31m",
+                fallback_model="fallback\x07",
+                thinking="high",
+            )
+        )
+
+        self.assertNotIn("\n", label)
+        self.assertNotIn("\x1b", label)
+        self.assertNotIn("\x07", label)
+        self.assertIn(r"model\x0a\x1b[31m", label)
+        self.assertIn(r"fallback\x07", label)
+
     def test_cursor_agent_bin_cli_alias(self) -> None:
         with mock.patch.object(
             sys,
