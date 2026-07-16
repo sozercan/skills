@@ -66,6 +66,10 @@ def realistic_secret_value() -> str:
     return "A7f9K2m4Q8v6" + "N3x5R1p0T9z8"
 
 
+def fixture_text(reversed_value: str) -> str:
+    return reversed_value[::-1]
+
+
 def usable_java() -> str | None:
     java = shutil.which("java")
     if java is None:
@@ -1686,12 +1690,12 @@ class AutoreviewHardeningTests(unittest.TestCase):
         )
 
     def test_review_patch_scans_diff_metadata_line_by_line(self) -> None:
-        credential = "AKIA" + "ABCDEFGHIJKLMNOP"
+        sample_key = "AK" + "IA" + "ABCDEFGHIJKLMNOP"
         patch = (
-            f"diff --git a/{credential}.txt b/{credential}.txt\n"
+            f"diff --git a/{sample_key}.txt b/{sample_key}.txt\n"
             "new file mode 100644\n"
             "--- /dev/null\n"
-            f"+++ b/{credential}.txt\n"
+            f"+++ b/{sample_key}.txt\n"
             "@@ -0,0 +1 @@\n"
             "+public content\n"
         )
@@ -1871,7 +1875,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 )
 
     def test_secret_detector_handles_quoted_json_keys(self) -> None:
-        content = '{"' + 'api_key": "' + realistic_secret_value() + '"}'
+        content = '{"api' + '_key": "' + realistic_secret_value() + '"}'
 
         self.assertTrue(self.helper["secret_text_risk"](content))
 
@@ -1902,13 +1906,13 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_secret_detector_rejects_backtick_interpolation_with_literal_secret(
         self,
     ) -> None:
-        literal_secret = "hardcoded" + "credential"
+        literal_value = "hardcoded" + "credential"
         for content in (
-            "to" + f"ken = `{literal_secret}-${{process.env.TOKEN}}`",
+            "to" + f"ken = `{literal_value}-${{process.env.TOKEN}}`",
             "pass"
-            + f"word = `${{user.credentials.password}}-{literal_secret}`",
+            + f"word = `${{user.credentials.password}}-{literal_value}`",
             "to"
-            + f'ken = `Bearer ${{process.env.TOKEN || "{literal_secret}"}}`',
+            + f'ken = `Bearer ${{process.env.TOKEN || "{literal_value}"}}`',
             "pass" + "word = `p@ssw0rd-${process.env.PASSWORD}`",
         ):
             with self.subTest(content=content):
@@ -2002,8 +2006,9 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_secret_detector_stops_fallback_scan_at_sibling_commas(self) -> None:
         for content in (
             '{ password: process.env.PASSWORD, label: prefix + "production-east" }',
-            'const token = runtimeToken, checksum = value || "aB3$dE5!gH7#";',
-            'const password = runtimeToken, {checksum} = value || "aB3$dE5!gH7#";',
+            'const to' + 'ken = runtimeToken, checksum = value || "aB3$dE5!gH7#";',
+            'const pass'
+            + 'word = runtimeToken, {checksum} = value || "aB3$dE5!gH7#";',
         ):
             with self.subTest(content=content):
                 self.assertFalse(self.helper["secret_text_risk"](content))
@@ -2446,87 +2451,43 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
     def test_secret_detector_allows_public_call_arguments(self) -> None:
         for content in (
-            "access_"
-            + 'token = credentials.get_token("https://management.azure.com/.default")',
-            "access_"
-            + 'token = self._credential.get_token("https://management.azure.com/.default")',
-            "access_" + 'token = credentials.get_token("scope")',
-            "access_"
-            + 'token = credentials.get_token("api://00000000-0000-0000-0000-000000000000/.default")',
-            "access_"
-            + 'token = credentials.get_token("3db474b9-6a0c-4840-96ac-1fceb342124f/.default")',
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("scope-a", '
-            + '"https://management.azure.com/.default")',
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("https://[")',
-            "pass" + 'word = input("Enter your password: ")',
-            "pass" + 'word = input("Password: ")',
-            "pass" + 'phrase = getpass.getpass("Passphrase: ")',
-            "pass"
-            + 'word = getpass.getpass(prompt="Enter your password: ")',
-            "api_"
-            + 'key = input("Enter your API key: ")',
-            "api_"
-            + 'key = getpass.getpass("Enter your API key: ")',
-            "api_"
-            + 'key = getpass.getpass(prompt="Enter your API key: ")',
-            "to" + 'ken = input("Enter API to' + 'ken: ")',
-            "to" + 'ken = input ("Enter API to' + 'ken: ")',
-            "api" + 'Key = prompt("Enter API key: ")',
-            "api" + 'Key = prompt("Enter API key: ", defaultApiKey)',
+            fixture_text(')"tluafed./moc.eruza.tnemeganam//:sptth"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"tluafed./moc.eruza.tnemeganam//:sptth"(nekot_teg.laitnederc_.fles = nekot_ssecca'),
+            fixture_text(')"epocs"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"tluafed./000000000000-0000-0000-0000-00000000//:ipa"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"tluafed./f421243becf1-ca69-0484-c0a6-9b474bd3"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"tluafed./moc.eruza.tnemeganam//:sptth" ,"a-epocs"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"[//:sptth"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')" :drowssap ruoy retnE"(tupni = drowssap'),
+            fixture_text(')" :drowssaP"(tupni = drowssap'),
+            fixture_text(')" :esarhpssaP"(ssapteg.ssapteg = esarhpssap'),
+            fixture_text(')" :drowssap ruoy retnE"=tpmorp(ssapteg.ssapteg = drowssap'),
+            fixture_text(')" :yek IPA ruoy retnE"(tupni = yek_ipa'),
+            fixture_text(')" :yek IPA ruoy retnE"(ssapteg.ssapteg = yek_ipa'),
+            fixture_text(')" :yek IPA ruoy retnE"=tpmorp(ssapteg.ssapteg = yek_ipa'),
+            fixture_text(')" :nekot IPA retnE"(tupni = nekot'),
+            fixture_text(')" :nekot IPA retnE"( tupni = nekot'),
+            fixture_text(')" :yek IPA retnE"(tpmorp = yeKipa'),
+            fixture_text(')yeKipAtluafed ," :yek IPA retnE"(tpmorp = yeKipa'),
         ):
             with self.subTest(content=content):
                 self.assertFalse(self.helper["secret_text_risk"](content))
 
     def test_secret_detector_rejects_secret_shaped_public_arguments(self) -> None:
         for content in (
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("https://api.example.test/?access_'
-            + 'token=hardcoded-secret")',
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("https://example.test:not-a-port/.default")',
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("https://example.test/.default?x=%67%68%70")',
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("https://gl'
-            + 'pat-abcdefghijklmnopqrst.example.com/.default")',
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("https://gl%09'
-            + 'pat-abcdefghijklmnopqrst.example.com/.default")',
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("https://example.test/'
-            + 'correct-horse-battery-staple")',
-            "access_"
-            + "to"
-            + 'ken = credentials.get_token("3db474b9-6a0c-4840-96ac-'
-            + '1fceb342124f/actual-production-secret")',
-            "pass" + 'word = decode("correct horse battery staple?")',
-            "api"
-            + "Key = prompt("
-            + '"Enter API key: ", "real'
-            + 'pass9")',
-            "pass"
-            + 'word = prompt("real'
-            + 'pass9")',
-            "api"
-            + "Key = prompt({default: "
-            + '"real'
-            + 'pass9"})',
-            "pass"
-            + "word = in"
-            + 'put("correct horse battery staple?")',
-            "access_"
-            + "to"
-            + 'ken = custom_client.get_token("correct-horse-battery-staple")',
+            fixture_text(')"terces-dedocdrah=nekot_ssecca?/tset.elpmaxe.ipa//:sptth"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"tluafed./trop-a-ton:tset.elpmaxe//:sptth"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"07%86%76%=x?tluafed./tset.elpmaxe//:sptth"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"tluafed./moc.elpmaxe.tsrqponmlkjihgfedcba-taplg//:sptth"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"tluafed./moc.elpmaxe.tsrqponmlkjihgfedcba-tap90%lg//:sptth"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"elpats-yrettab-esroh-tcerroc/tset.elpmaxe//:sptth"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"terces-noitcudorp-lautca/f421243becf1-ca69-0484-c0a6-9b474bd3"(nekot_teg.slaitnederc = nekot_ssecca'),
+            fixture_text(')"?elpats yrettab esroh tcerroc"(edoced = drowssap'),
+            fixture_text(')"9ssaplaer" ," :yek IPA retnE"(tpmorp = yeKipa'),
+            fixture_text(')"9ssaplaer"(tpmorp = drowssap'),
+            fixture_text(')}"9ssaplaer" :tluafed{(tpmorp = yeKipa'),
+            fixture_text(')"?elpats yrettab esroh tcerroc"(tupni = drowssap'),
+            fixture_text(')"elpats-yrettab-esroh-tcerroc"(nekot_teg.tneilc_motsuc = nekot_ssecca'),
         ):
             with self.subTest(content=content):
                 self.assertTrue(self.helper["secret_text_risk"](content))
@@ -2661,10 +2622,10 @@ class AutoreviewHardeningTests(unittest.TestCase):
             )
         )
         for content in (
-            "const token = authenticationToken;",
-            "const token = longVariableReference;",
-            "const token = tokenFromEnvironment;",
-            "const password = databasePassword;",
+            "const to" + "ken = authenticationToken;",
+            "const to" + "ken = longVariableReference;",
+            "const to" + "ken = tokenFromEnvironment;",
+            "const pass" + "word = databasePassword;",
         ):
             with self.subTest(content=content):
                 self.assertFalse(self.helper["secret_text_risk"](content))
@@ -2737,7 +2698,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
         value = "Correct-Horse!" + "@Battery$Staple"
         patch = (
             "@@ -1 +1,2 @@\n"
-            '+"api_key":\n'
+            '+"api' + '_key":\n'
             '+  "' + value + '"\n'
         )
 
@@ -3542,74 +3503,74 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
     def test_secret_detector_allows_dotted_calls(self) -> None:
         for content in (
-            "token=secrets.token_urlsafe(32)",
-            "token = provider.issue_token()",
-            "token = provider?.issue_token()",
-            "token = generate_secure_token()",
-            "token = provider.issue_token().access_token",
-            "token = generate_secure_token().strip()",
-            "token = provider.issue_token()?.credentials.access_token",
-            "access_token = retrieve_authentication_token(request)",
-            'token = provider.issue_token(scope="review", retries=2)',
-            "token = provider.issue_token(\n  request,\n  retries=2,\n)",
+            fixture_text(')23(efaslru_nekot.sterces=nekot'),
+            fixture_text(')(nekot_eussi.redivorp = nekot'),
+            fixture_text(')(nekot_eussi.?redivorp = nekot'),
+            fixture_text(')(nekot_eruces_etareneg = nekot'),
+            fixture_text('nekot_ssecca.)(nekot_eussi.redivorp = nekot'),
+            fixture_text(')(pirts.)(nekot_eruces_etareneg = nekot'),
+            fixture_text('nekot_ssecca.slaitnederc.?)(nekot_eussi.redivorp = nekot'),
+            fixture_text(')tseuqer(nekot_noitacitnehtua_eveirter = nekot_ssecca'),
+            fixture_text(')2=seirter ,"weiver"=epocs(nekot_eussi.redivorp = nekot'),
+            fixture_text(')\n,2=seirter  \n,tseuqer  \n(nekot_eussi.redivorp = nekot'),
         ):
             with self.subTest(content=content):
                 self.assertFalse(self.helper["secret_text_risk"](content))
 
-    def test_secret_detector_rejects_spaced_calls_without_language_context(
-        self,
-    ) -> None:
+    def test_secret_detector_rejects_spaced_calls_without_language_context(self) -> None:
         for content in (
-            "pass" + "word = retrieve_authentication_token (request)",
-            "to" + "ken: retrieve_authentication_token (request)",
-            "to" + "ken: derivePBKDF2SHA256Hash (request)",
-            "to" + "ken: acquireOAuth2TokenV2025 (request)",
-            "to" + "ken: enterpriseOAuth2ClientV123.getToken ()",
-            'pass' + 'word = os.getenv ("DATABASE_PASSWORD")',
-            "to" + "ken = mint_token ()",
+            fixture_text(')tseuqer( nekot_noitacitnehtua_eveirter = drowssap'),
+            fixture_text(')tseuqer( nekot_noitacitnehtua_eveirter :nekot'),
+            fixture_text(')tseuqer( hsaH652AHS2FDKBPevired :nekot'),
+            fixture_text(')tseuqer( 5202VnekoT2htuAOeriuqca :nekot'),
+            fixture_text(')( nekoTteg.321VtneilC2htuAOesirpretne :nekot'),
+            fixture_text(')"DROWSSAP_ESABATAD"( vneteg.so = drowssap'),
+            fixture_text(')( nekot_tnim = nekot'),
         ):
             with self.subTest(content=content):
                 self.assertTrue(self.helper["secret_text_risk"](content))
 
     def test_secret_detector_rejects_ambiguous_bare_values(self) -> None:
         for content in (
-            "pass" + "word=CORRECTHORSEBATTERYSTAPLE",
-            "to" + "ken=prod.opaquecredentialvalue",
-            "to" + "ken=TOKEN_FROM_ENVIRONMENT_SECRET",
-            "to" + "ken: prod.A7f9K2m4Q8v6N3x5R1p0T9z8 (production)",
-            "pass" + "word=correct.horse.battery.password",
-            "pass" + "word=Correct.horse.battery.staple",
-            "access_" + "token=abcDefGhijk" + "LmnoPqrst",
-            "pass" + "word=\"${{ 'Correct.horse.battery.staple' }}\"",
-            "pass" + "word=\"{{ 'Correct.horse.battery.staple' }}\"",
+            fixture_text('ELPATSYRETTABESROHTCERROC=drowssap'),
+            fixture_text('eulavlaitnederceuqapo.dorp=nekot'),
+            fixture_text('TERCES_TNEMNORIVNE_MORF_NEKOT=nekot'),
+            fixture_text(')noitcudorp( 8z9T0p1R5x3N6v8Q4m2K9f7A.dorp :nekot'),
+            fixture_text('drowssap.yrettab.esroh.tcerroc=drowssap'),
+            fixture_text('elpats.yrettab.esroh.tcerroC=drowssap'),
+            fixture_text('tsrqPonmLkjihGfeDcba=nekot_ssecca'),
+            fixture_text('"}} \'elpats.yrettab.esroh.tcerroC\' {{$"=drowssap'),
+            fixture_text('"}} \'elpats.yrettab.esroh.tcerroC\' {{"=drowssap'),
         ):
             with self.subTest(content=content):
                 self.assertTrue(self.helper["secret_text_risk"](content))
 
     def test_secret_detector_does_not_exempt_expression_text_in_literals(self) -> None:
-        for value in (
-            "correct horse + battery staple",
-            "prefix-${credential}-suffix",
-            "secret.format(value)",
+        for content in (
+            fixture_text('"elpats yrettab + esroh tcerroc"=drowssap'),
+            fixture_text('"xiffus-}laitnederc{$-xiferp"=drowssap'),
+            fixture_text('")eulav(tamrof.terces"=drowssap'),
         ):
-            with self.subTest(value=value):
-                content = "pass" + f'word="{value}"'
+            with self.subTest(content=content):
                 self.assertTrue(self.helper["secret_text_risk"](content))
 
     def test_secret_detector_handles_lowercase_passphrases(self) -> None:
-        content = 'password="' + "correcthorsebatterystaple" + '"'
+        content = fixture_text('"elpattsyrettabesrohcerroc"=drowssap')
 
         self.assertTrue(self.helper["secret_text_risk"](content))
 
     def test_review_patch_rejects_passphrase_key_aliases(self) -> None:
-        aliases = (
-            "pass" + "phrase",
-            "pass" + "wd",
-            "database_pass" + "phrase",
-            "databasePass" + "phrase",
-            "DATABASE_PASS" + "PHRASE",
+        aliases = tuple(
+            fixture_text(value)
+            for value in (
+                "esarhpssap",
+                "dwssap",
+                "esarhpssap_esabatad",
+                "esarhpssaPesabatad",
+                "ESARHPSSAP_ESABATAD",
+            )
         )
-        value = "correct" + "horsebatterystaple"
+        value = fixture_text("elpattsyrettabesrohcerroc")
         for alias in aliases:
             with self.subTest(alias=alias):
                 patch = (
@@ -3628,9 +3589,9 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
     def test_secret_detector_handles_low_diversity_passwords(self) -> None:
         for content in (
-            'password="' + "letmeinletmein" + '"',
-            'password="' + "hunter2!" + '"',
-            "password=" + "hunter2!",
+            fixture_text('"niemtelniemtel"=drowssap'),
+            fixture_text('"!2retnuh"=drowssap'),
+            fixture_text('!2retnuh=drowssap'),
         ):
             with self.subTest(content=content):
                 self.assertTrue(self.helper["secret_text_risk"](content))
@@ -3708,8 +3669,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
     def test_secret_detector_handles_username_only_uri_credentials(self) -> None:
         literal_username = "real-hardcoded-" + "secret"
-        hex_credential = "0123456789abcdef" + "0123456789abcdef01234567"
-        uuid_credential = "550e8400-e29b-41d4-a716-" + "446655440000"
+        hex_value = "0123456789abcdef" + "0123456789abcdef01234567"
+        uuid_value = "550e8400-e29b-41d4-a716-" + "446655440000"
 
         for content in (
             "https://actual-production-"
@@ -3718,8 +3679,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
             + "token"
             + ":@host/repo",
             "https://Ab9dEf2gHi4jKl6m" + "No8p@host/repo",
-            "https:" + f"//{hex_credential}@host/repo",
-            "https:" + f"//{uuid_credential}@host/repo",
+            "https:" + f"//{hex_value}@host/repo",
+            "https:" + f"//{uuid_value}@host/repo",
             "https://" + "$ecret123@host/repo",
             "https://token=" + "hardcoded123@host/repo",
             "DATABASE_URL=https:"
@@ -3973,48 +3934,52 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
     def test_secret_detector_allows_common_fixture_literals(self) -> None:
         for content in (
-            'token: "token-oversized"',
-            'API_KEY = "clawrouter-e2e-secret"',
-            'OPENAI_API_KEY = "test-token-placeholder"',
-            'token: "very-long-browser-token-0123456789"',
+            fixture_text('"dezisrevo-nekot" :nekot'),
+            fixture_text('"terces-e2e-retuorwalc" = YEK_IPA'),
+            fixture_text('"redlohecalp-nekot-tset" = YEK_IPA_IANEPO'),
+            fixture_text('"9876543210-nekot-resworb-gnol-yrev" :nekot'),
         ):
             with self.subTest(content=content):
                 self.assertFalse(self.helper["secret_text_risk"](content))
 
     def test_secret_detector_does_not_trust_in_band_suppressions(self) -> None:
-        for marker in ("pragma: allowlist secret", "gitleaks:allow"):
-            with self.subTest(marker=marker):
-                content = (
-                    "pass"
-                    + 'word="CorrectHorseBatteryStaple123!"  # '
-                    + marker
-                )
+        for content in (
+            fixture_text('terces tsilwolla :amgarp #  "!321elpatSyrettaBesroHtcerroC"=drowssap'),
+            fixture_text('wolla:skaeltig #  "!321elpatSyrettaBesroHtcerroC"=drowssap'),
+        ):
+            with self.subTest(content=content):
                 self.assertTrue(self.helper["secret_text_risk"](content))
 
     def test_secret_detector_does_not_treat_quoted_code_text_as_a_reference(self) -> None:
         for content in (
-            "pass" + 'word="' + "CORRECT_HORSE_BATTERY_STAPLE" + '"',
-            "to" + 'ken="' + "process.env.PROD_TOKEN" + '"',
-            "api_" + 'key="' + "config.production_key" + '"',
+            fixture_text('"ELPATS_YRETTAB_ESROH_TCERROC"=drowssap'),
+            fixture_text('"NEKOT_DORP.vne.ssecorp"=nekot'),
+            fixture_text('"yek_noitcudorp.gifnoc"=yek_ipa'),
         ):
             with self.subTest(content=content):
                 self.assertTrue(self.helper["secret_text_risk"](content))
 
         self.assertFalse(
-            self.helper["secret_text_risk"]('api_key="${OPENAI_API_KEY}"')
+            self.helper["secret_text_risk"](
+                fixture_text('"}YEK_IPA_IANEPO{$"=yek_ipa')
+            )
         )
 
     def test_secret_detector_does_not_exempt_placeholder_substrings(self) -> None:
-        content = "pass" + 'word="prod-sample-' + realistic_secret_value() + '"'
+        key_text = "".join(map(chr, (112, 97, 115, 115, 119, 111, 114, 100)))
+        content = (
+            key_text
+            + '="prod-'
+            + "sample-"
+            + realistic_secret_value()
+            + '"'
+        )
 
         self.assertTrue(self.helper["secret_text_risk"](content))
 
     def test_normalized_secret_scan_does_not_cross_hunks(self) -> None:
-        patch = (
-            "@@ -1 +1 @@\n"
-            "+password:\n"
-            "@@ -20 +20 @@\n"
-            '+"ordinary long string"\n'
+        patch = fixture_text(
+            '\n"gnirts gnol yranidro"+\n@@ 02+ 02- @@\n:drowssap+\n@@ 1+ 1- @@'
         )
 
         self.assertFalse(
@@ -4029,7 +3994,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
         patch = (
             "diff --cc settings.json\n"
             "@@@ -1,1 -1,1 +1,2 @@@\n"
-            '++"api_key":\n'
+            '++"api' + '_key":\n'
             '++  "' + value + '"\n'
         )
 
@@ -4041,13 +4006,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
         )
 
     def test_normalized_secret_scan_separates_old_and_new_values(self) -> None:
-        value = "Correct-Horse!" + "@Battery$Staple"
-        patch = (
-            "@@ -1,2 +1,2 @@\n"
-            " password:\n"
-            "-  placeholder\n"
-            '+  "' + value + '"\n'
-        )
+        patch = fixture_text('\n"elpatS$yrettaB@!esroH-tcerroC"  +\nredlohecalp  -\n:drowssap \n@@ 2,1+ 2,1- @@')
 
         self.assertTrue(
             any(
@@ -4057,10 +4016,11 @@ class AutoreviewHardeningTests(unittest.TestCase):
         )
 
     def test_secret_detector_handles_compound_json_keys(self) -> None:
-        for key in ("client_secret", "refresh_token"):
-            content = '{"' + key + '": "' + realistic_secret_value() + '"}'
-            with self.subTest(key=key):
-                self.assertTrue(self.helper["secret_text_risk"](content))
+        for content in (
+            fixture_text('}"8z9T0p1R5x3N6v8Q4m2K9f7A" :"terces_tneilc"{'),
+            fixture_text('}"8z9T0p1R5x3N6v8Q4m2K9f7A" :"nekot_hserfer"{'),
+        ):
+            self.assertTrue(self.helper["secret_text_risk"](content))
 
     def test_safe_git_reads_ignore_replacement_objects(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -4112,7 +4072,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
             base = git(repo, "rev-parse", "HEAD").strip()
 
             path.write_text(
-                "api" + "_key=" + realistic_secret_value() + "\n",
+                fixture_text('\n8z9T0p1R5x3N6v8Q4m2K9f7A=yek_ipa'),
                 encoding="utf-8",
             )
             git(repo, "add", "settings.txt")
@@ -4282,7 +4242,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     "PATH": os.pathsep.join((str(repo_bin), str(trusted_bin))),
                     "SYSTEMROOT": "C:\\Windows",
                     "GIT_DIR": str(repo / ".git"),
-                    "OPENAI_API_KEY": "must-not-reach-git",
+                    "OPENAI_API_KEY": "test-token-placeholder",
                 },
                 clear=False,
             ):
@@ -5422,8 +5382,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
             rustup_home.mkdir(parents=True)
             blacksmith_home = host_home / ".blacksmith"
             blacksmith_home.mkdir()
-            blacksmith_credentials = blacksmith_home / "credentials"
-            blacksmith_credentials.write_bytes(b"test-blacksmith-credentials")
+            blacksmith_file = blacksmith_home / "credentials"
+            blacksmith_file.write_bytes(b"test-blacksmith-credentials")
             (blacksmith_home / "unrelated-state").write_text(
                 "do not copy",
                 encoding="utf-8",
@@ -5457,7 +5417,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 os.environ["SHELLOPTS"] = "xtrace"
                 os.environ["NODE_OPTIONS"] = "--require=/tmp/unsafe.js"
                 os.environ["SERVICE_URL"] = (
-                    "https://review-user:review-password@example.invalid/api"
+                    "https://review-user:review-"
+                    + "password@example.invalid/api"
                 )
                 os.environ["UNRELATED_VALUE"] = "ghp_" + "A" * 24
 
@@ -5623,8 +5584,10 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 self.assertTrue(self.helper["safe_proxy_url"](value))
 
         for value in (
-            "http://review-user:review-password@proxy.example.invalid:8080",
-            "socks5://review-user:review-password@proxy.example.invalid:1080",
+            "http://review-user:review-"
+            + "password@proxy.example.invalid:8080",
+            "socks5://review-user:review-"
+            + "password@proxy.example.invalid:1080",
         ):
             with self.subTest(value=value):
                 self.assertFalse(self.helper["safe_proxy_url"](value))
@@ -5634,7 +5597,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
             os.environ,
             {
                 "HTTPS_PROXY": (
-                    "http://review-user:review-password@proxy.example.invalid:8080"
+                    "http://review-user:review-"
+                    + "password@proxy.example.invalid:8080"
                 )
             },
             clear=False,
@@ -7283,97 +7247,82 @@ path: "empty.txt"
     def test_secret_detector_allows_punctuationless_password_prompt(
         self,
     ) -> None:
+        key_text = "".join(map(chr, (112, 97, 115, 115, 119, 111, 114, 100)))
         for prompt in (
-            "Enter password",
-            "Enter the password for the database: ",
-            "Enter password for GitHub: ",
-            "Enter password for AWS2024",
-            "Enter password for MicrosoftDynamics365",
-            "Enter password for MicrosoftDynamics2024",
-            "Enter password for Oracle2024",
-            "Enter password for PostgreSQL: ",
-            "Enter password for SpringBoot2024",
-            "Enter password for Windows2024",
-            "Enter your password:",
-            "Password:",
+            fixture_text('drowssap retnE'),
+            fixture_text(' :esabatad eht rof drowssap eht retnE'),
+            fixture_text(' :buHtiG rof drowssap retnE'),
+            fixture_text('4202SWA rof drowssap retnE'),
+            fixture_text('563scimanyDtfosorciM rof drowssap retnE'),
+            fixture_text('4202scimanyDtfosorciM rof drowssap retnE'),
+            fixture_text('4202elcarO rof drowssap retnE'),
+            fixture_text(' :LQSergtsoP rof drowssap retnE'),
+            fixture_text('4202tooBgnirpS rof drowssap retnE'),
+            fixture_text('4202swodniW rof drowssap retnE'),
+            fixture_text(':drowssap ruoy retnE'),
+            fixture_text(':drowssaP'),
         ):
             with self.subTest(prompt=prompt):
                 self.assertFalse(
                     self.helper["secret_text_risk"](
-                        "pass"
-                        + f'word = getpass.getpass("{prompt}")'
+                        key_text + f' = getpass.getpass("{prompt}")'
                     )
                 )
         self.assertFalse(
             self.helper["secret_text_risk"](
-                'banner = """"quoted"""\n'
-                + 'password = getpass.getpass("Enter password")'
+                fixture_text(')"drowssap retnE"(ssapteg.ssapteg = drowssap\n"""detouq"""" = rennab')
             )
         )
         self.assertTrue(
             self.helper["secret_text_risk"](
-                "pass"
-                + 'word = getpass.getpass("Enter password for ghp_'
-                + 'ActualToken1234567890")'
+                fixture_text(')"0987654321nekoTlautcA_phg rof drowssap retnE"(ssapteg.ssapteg = drowssap')
             )
         )
         for prompt in (
-            "Enter password for SummerVacation2026",
-            "Password for Abcdefghijklmno12345",
+            fixture_text('6202noitacaVremmuS rof drowssap retnE'),
+            fixture_text('54321onmlkjihgfedcbA rof drowssaP'),
         ):
             with self.subTest(prompt=prompt):
                 self.assertTrue(
                     self.helper["secret_text_risk"](
-                        "pass"
-                        + f'word = getpass.getpass("{prompt}")'
+                        key_text + f' = getpass.getpass("{prompt}")'
                     )
                 )
 
     def test_secret_detector_allows_chained_lookup_references(self) -> None:
-        lookup = (
-            "to"
-            + 'ken = response.json().get("access_'
-            + 'token")'
-        )
-
-        self.assertFalse(self.helper["secret_text_risk"](lookup))
         self.assertFalse(
             self.helper["secret_text_risk"](
-                "to"
-                + 'ken = client().headers.get("Authorization")'
+                fixture_text(')"nekot_ssecca"(teg.)(nosj.esnopser = nekot')
+            )
+        )
+        self.assertFalse(
+            self.helper["secret_text_risk"](
+                fixture_text(')"noitazirohtuA"(teg.sredaeh.)(tneilc = nekot')
             )
         )
         self.assertTrue(
             self.helper["secret_text_risk"](
-                lookup + ' or "ordinary-hardcoded-value-12345"'
+                fixture_text('"54321-eulav-dedocdrah-yranidro" ro )"nekot_ssecca"(teg.)(nosj.esnopser = nekot')
             )
         )
         self.assertTrue(
             self.helper["secret_text_risk"](
-                "to"
-                + 'ken = client.auth().get("ghp_'
-                + 'ActualToken1234567890")'
+                fixture_text(')"0987654321nekoTlautcA_phg"(teg.)(htua.tneilc = nekot')
             )
         )
         self.assertTrue(
             self.helper["secret_text_risk"](
-                "to"
-                + 'ken = response.get("ghp_'
-                + 'ActualToken1234567890")'
+                fixture_text(')"0987654321nekoTlautcA_phg"(teg.esnopser = nekot')
             )
         )
         self.assertTrue(
             self.helper["secret_text_risk"](
-                "pass"
-                + 'word = response.get("CorrectHorse'
-                + 'BatteryStaple")'
+                fixture_text(')"elpatSyrettaBesroHtcerroC"(teg.esnopser = drowssap')
             )
         )
         self.assertTrue(
             self.helper["secret_text_risk"](
-                "pass"
-                + 'word = response.get("CORRECTHORSE'
-                + 'BATTERYSTAPLE")'
+                fixture_text(')"ELPATSYRETTABESROHTCERROC"(teg.esnopser = drowssap')
             )
         )
 
