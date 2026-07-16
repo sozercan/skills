@@ -142,7 +142,18 @@ def create_fixture_repo(repo: Path, fixture: str) -> None:
 
     write_fixture_file(repo, MALICIOUS_INITIAL if fixture == "malicious" else BENIGN_INITIAL)
     run(["git", "add", "app.js"], repo)
-    run(["git", "commit", "--quiet", "-m", "initial safe version"], repo)
+    run(
+        [
+            "git",
+            "-c",
+            "commit.gpgSign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "initial safe version",
+        ],
+        repo,
+    )
     write_fixture_file(repo, MALICIOUS_CHANGED if fixture == "malicious" else BENIGN_CHANGED)
 
 

@@ -415,6 +415,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_auto_mode_prefers_explicit_and_pr_base_on_default_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
+            git(repo, "config", "core.autocrlf", "false")
             (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
             git(repo, "add", "tracked.txt")
             git(repo, "commit", "-q", "-m", "base")
@@ -3464,6 +3465,58 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 argparse.Namespace(engine="droid", tools=False),
                 True,
             )
+
+    @unittest.skipIf(os.name == "nt", "POSIX Git filter executable")
+    def test_safe_git_reads_neutralize_clean_and_process_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            (repo / ".gitattributes").write_text(
+                "*.txt filter=hostile\n",
+                encoding="utf-8",
+            )
+            source = repo / "source.txt"
+            source.write_text("base\n", encoding="utf-8")
+            git(repo, "add", ".gitattributes", "source.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            marker = root / "filter-invoked"
+            filter_script = self.helper["write_executable"](
+                root / "filter",
+                "#!/bin/sh\nprintf invoked >> '"
+                + str(marker).replace("'", "'\"'\"'")
+                + "'\ncat\n",
+            )
+            git(repo, "config", "filter.hostile.clean", str(filter_script))
+            git(repo, "config", "filter.hostile.process", str(filter_script))
+            git(repo, "config", "filter.hostile.required", "true")
+            source.write_text("changed\n", encoding="utf-8")
+
+            bundle, truncated = self.helper["local_bundle"](repo)
+
+            self.assertIn("+changed", bundle)
+            self.assertFalse(marker.exists())
+            self.assertFalse(truncated)
+
+    def test_safe_git_reads_force_normal_diff_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            source = repo / "source.txt"
+            source.write_text(
+                "one\ntwo\nthree\nfour\nfive\n",
+                encoding="utf-8",
+            )
+            git(repo, "add", "source.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            git(repo, "config", "diff.context", "0")
+            source.write_text(
+                "one\ntwo\nchanged\nfour\nfive\n",
+                encoding="utf-8",
+            )
+
+            bundle, _ = self.helper["local_bundle"](repo)
+
+            self.assertIn(" one", bundle)
+            self.assertIn(" five", bundle)
 
     def test_safe_git_reads_disable_signature_hooks_and_color(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

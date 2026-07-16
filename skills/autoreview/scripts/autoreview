@@ -48,6 +48,8 @@ SAFE_GIT_CONFIG_ARGS = (
     "-c",
     "log.showSignature=false",
     "-c",
+    "diff.context=3",
+    "-c",
     "diff.external=",
     "-c",
     "diff.renames=false",
@@ -76,6 +78,7 @@ ENGINE_GIT_CONFIG_OVERRIDES = (
     ("color.diff", "false"),
     ("color.status", "false"),
     ("log.showSignature", "false"),
+    ("diff.context", "3"),
     ("diff.external", ""),
     ("diff.renames", "false"),
     ("diff.suppressBlankEmpty", "false"),
@@ -1660,14 +1663,81 @@ def run_with_stream(
     return subprocess.CompletedProcess(args, returncode, "".join(stdout_parts), "".join(stderr_parts))
 
 
+def git_filter_config_args(repo: Path) -> list[str]:
+    git_bin = resolve_command("git", repo)
+    base_command = [
+        git_bin,
+        "--no-optional-locks",
+        *SAFE_GIT_CONFIG_ARGS,
+    ]
+    env = safe_git_env(repo)
+    paths = run(
+        [*base_command, "ls-files", "-z"],
+        repo,
+        env=env,
+        text_errors="strict",
+    ).stdout
+    if not paths:
+        return []
+    attributes = run(
+        [*base_command, "check-attr", "-z", "--stdin", "filter"],
+        repo,
+        input_text=paths,
+        env=env,
+        text_errors="strict",
+    ).stdout.split("\0")
+    drivers: set[str] = set()
+    for index in range(0, len(attributes) - 2, 3):
+        _path, attribute, value = attributes[index : index + 3]
+        if attribute != "filter" or value in {
+            "",
+            "set",
+            "unset",
+            "unspecified",
+        }:
+            continue
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", value) is None:
+            raise SystemExit(
+                "refusing unsafe Git filter driver name from attributes: "
+                f"{display_escape(value, 200)}"
+            )
+        drivers.add(value)
+    config: list[str] = []
+    for driver in sorted(drivers):
+        config.extend(
+            [
+                "-c",
+                f"filter.{driver}.clean=",
+                "-c",
+                f"filter.{driver}.process=",
+                "-c",
+                f"filter.{driver}.smudge=",
+                "-c",
+                f"filter.{driver}.required=false",
+            ]
+        )
+    return config
+
+
 def git_result(
     repo: Path,
     *args: str,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     try:
+        filter_config = (
+            git_filter_config_args(repo)
+            if args and args[0] in {"diff", "status"}
+            else []
+        )
         return run(
-            [resolve_command("git", repo), "--no-optional-locks", *SAFE_GIT_CONFIG_ARGS, *args],
+            [
+                resolve_command("git", repo),
+                "--no-optional-locks",
+                *SAFE_GIT_CONFIG_ARGS,
+                *filter_config,
+                *args,
+            ],
             repo,
             check=check,
             env=safe_git_env(repo),

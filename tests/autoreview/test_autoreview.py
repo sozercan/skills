@@ -154,6 +154,23 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
         self.assertIn(r"model\x0a\x1b[31m", label)
         self.assertIn(r"fallback\x07", label)
 
+    def test_harness_disables_fixture_commit_signing(self) -> None:
+        harness_path = SCRIPT_PATH.with_name("test-review-harness.py")
+        namespace = runpy.run_path(str(harness_path))
+        commands: list[list[str]] = []
+
+        def record(command: list[str], _cwd: Path) -> None:
+            commands.append(command)
+
+        with tempfile.TemporaryDirectory() as tempdir, mock.patch.dict(
+            namespace["create_fixture_repo"].__globals__,
+            {"run": record},
+        ):
+            namespace["create_fixture_repo"](Path(tempdir), "benign")
+
+        commit = next(command for command in commands if "commit" in command)
+        self.assertIn("commit.gpgSign=false", commit)
+
     def test_cursor_agent_bin_cli_alias(self) -> None:
         with mock.patch.object(
             sys,
