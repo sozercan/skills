@@ -307,6 +307,7 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
                 subprocess.run(
                     [trusted_git, "config", "--get", "core.fsmonitor"],
                     cwd=repo,
+                    env=namespace["fixture_git_env"](trusted_git),
                     text=True,
                     capture_output=True,
                     check=False,
