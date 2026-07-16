@@ -1843,14 +1843,14 @@ def choose_target(
     if mode == "commit":
         return "commit", None
 
+    selected_base = base_ref or detect_pr_base(repo)
+    if selected_base:
+        return "branch", selected_base
     default = default_branch(repo)
     if mode == "auto" and default is not None and branch == default[0]:
         raise SystemExit(
             "no review target: clean default-branch checkout and no forced mode"
         )
-    selected_base = base_ref or detect_pr_base(repo)
-    if selected_base:
-        return "branch", selected_base
     if default is not None:
         return "branch", default[1]
     raise SystemExit(
@@ -1862,9 +1862,36 @@ def detect_pr_base(repo: Path) -> str | None:
     gh_bin = find_command("gh", repo)
     if not gh_bin:
         return None
-    result = run([gh_bin, "pr", "view", "--json", "baseRefName", "--jq", ".baseRefName"], repo, check=False)
-    base = result.stdout.strip()
-    return f"origin/{base}" if result.returncode == 0 and base else None
+    result = run(
+        [
+            gh_bin,
+            "pr",
+            "view",
+            "--json",
+            "baseRefOid",
+            "--jq",
+            ".baseRefOid",
+        ],
+        repo,
+        check=False,
+    )
+    base_oid = result.stdout.strip()
+    if result.returncode != 0 or not base_oid:
+        return None
+    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", base_oid):
+        raise SystemExit("gh pr view returned an invalid PR base object ID")
+    resolved = resolve_git_ref(
+        repo,
+        base_oid,
+        "PR base object",
+        required=False,
+    )
+    if resolved is None:
+        raise SystemExit(
+            "the PR base object is not available locally; fetch the PR base "
+            "repository/ref or pass --base with the matching local ref"
+        )
+    return resolved
 
 
 def resolve_command(name: str, repo: Path) -> str:

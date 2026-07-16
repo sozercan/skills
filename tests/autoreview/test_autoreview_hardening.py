@@ -412,6 +412,81 @@ class AutoreviewHardeningTests(unittest.TestCase):
                         ("branch", f"origin/{default_name}"),
                     )
 
+    def test_auto_mode_prefers_explicit_and_pr_base_on_default_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            git(repo, "branch", "-M", "main")
+
+            self.assertEqual(
+                self.helper["choose_target"](
+                    repo,
+                    "auto",
+                    "HEAD",
+                    branch="main",
+                ),
+                ("branch", "HEAD"),
+            )
+            with mock.patch.dict(
+                self.helper["choose_target"].__globals__,
+                {"detect_pr_base": lambda _repo: "pr-base-oid"},
+            ):
+                self.assertEqual(
+                    self.helper["choose_target"](
+                        repo,
+                        "auto",
+                        None,
+                        branch="main",
+                    ),
+                    ("branch", "pr-base-oid"),
+                )
+
+    @unittest.skipIf(os.name == "nt", "POSIX fake gh executable")
+    def test_detect_pr_base_uses_oid_and_requires_local_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            base_oid = git(repo, "rev-parse", "HEAD").strip()
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            args_record = root / "gh-args"
+            gh = bin_dir / "gh"
+            gh.write_text(
+                "#!/bin/sh\nprintf '%s\n' \"$*\" > '"
+                + str(args_record).replace("'", "'\"'\"'")
+                + "'\nprintf '%s\n' '"
+                + base_oid
+                + "'\n",
+                encoding="utf-8",
+            )
+            gh.chmod(0o755)
+
+            with mock.patch.dict(
+                os.environ,
+                {"PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")},
+            ):
+                self.assertEqual(self.helper["detect_pr_base"](repo), base_oid)
+            invocation = args_record.read_text(encoding="utf-8")
+            self.assertIn("baseRefOid", invocation)
+            self.assertNotIn("baseRefName", invocation)
+
+            missing_oid = "f" * 40
+            gh.write_text(
+                "#!/bin/sh\nprintf '%s\n' '" + missing_oid + "'\n",
+                encoding="utf-8",
+            )
+            gh.chmod(0o755)
+            with mock.patch.dict(
+                os.environ,
+                {"PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")},
+            ), self.assertRaisesRegex(SystemExit, "not available locally"):
+                self.helper["detect_pr_base"](repo)
+
     def test_dirty_check_respects_trusted_global_excludes(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)

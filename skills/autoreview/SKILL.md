@@ -171,12 +171,18 @@ Optional review context is first-class. Prompt files and datasets must be repo-r
 "$AUTOREVIEW" --mode branch --base origin/main --prompt-file review-notes.md --dataset evidence.json
 ```
 
-If an open PR exists, use its actual base:
+If an open PR exists, use its actual base object. This avoids assuming that
+`origin` owns the PR base in fork checkouts:
 
 ```bash
-base=$(gh pr view --json baseRefName --jq .baseRefName)
-"$AUTOREVIEW" --mode branch --base "origin/$base"
+base_oid=$(gh pr view --json baseRefOid --jq .baseRefOid)
+git cat-file -e "$base_oid^{commit}"
+"$AUTOREVIEW" --mode branch --base "$base_oid"
 ```
+
+If the object is not available locally, fetch the PR base repository/ref into a
+local remote (often named `upstream`) and pass that matching local ref, for
+example `--base upstream/main`. Autoreview does not fetch automatically.
 
 Committed single change:
 
@@ -403,7 +409,7 @@ The helper:
 
 - chooses dirty local changes first
 - accepts `--mode uncommitted` as an alias for `--mode local`
-- otherwise uses current PR base if `gh pr view` works
+- otherwise uses the current PR base object ID if `gh pr view` works and that object exists locally
 - otherwise uses the detected default ref (for example `origin/main`, `origin/master`, the remote `origin/HEAD` target, or an unambiguous local default branch)
 - does not fetch automatically during branch review; the selected base ref must already resolve locally
 - recognizes `--engine droid`, `copilot`, `cursor`, and `opencode` only to fail closed with isolation errors; runnable engines are `codex`, `claude`, and `pi`; default is `AUTOREVIEW_ENGINE` or `codex`
