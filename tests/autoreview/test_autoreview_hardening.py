@@ -4254,6 +4254,74 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertNotIn("GIT_DIR", env)
         self.assertNotIn("OPENAI_API_KEY", env)
 
+    def test_subprocess_environments_reject_checkout_local_comspec(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            (repo / "bin").mkdir()
+            (root / "trusted").mkdir()
+            repo_cmd = self.helper["write_executable"](
+                repo / "bin" / "cmd.exe",
+                "#!/bin/sh\nexit 0\n",
+            )
+            trusted_cmd = self.helper["write_executable"](
+                root / "trusted" / "cmd.exe",
+                "#!/bin/sh\nexit 0\n",
+            )
+            isolated_home = root / "test-home"
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "COMSPEC": str(repo_cmd),
+                    "PATH": os.pathsep.join(
+                        (str(repo_cmd.parent), str(trusted_cmd.parent))
+                    ),
+                },
+                clear=False,
+            ):
+                sanitized = (
+                    self.helper["safe_git_env"](repo),
+                    self.helper["safe_engine_env"](repo, engine="codex"),
+                    self.helper["safe_test_env"](repo, isolated_home),
+                )
+                for env in sanitized:
+                    value = env.get("COMSPEC")
+                    if value is not None:
+                        self.assertFalse(
+                            Path(value).resolve().is_relative_to(repo.resolve())
+                        )
+                        self.assertNotEqual(
+                            Path(value).resolve(),
+                            repo_cmd.resolve(),
+                        )
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "COMSPEC": str(trusted_cmd),
+                    "PATH": str(trusted_cmd.parent),
+                },
+                clear=False,
+            ):
+                expected = str(Path(os.path.abspath(trusted_cmd)))
+                self.assertEqual(
+                    self.helper["safe_git_env"](repo)["COMSPEC"],
+                    expected,
+                )
+                self.assertEqual(
+                    self.helper["safe_engine_env"](repo, engine="codex")[
+                        "COMSPEC"
+                    ],
+                    expected,
+                )
+                self.assertEqual(
+                    self.helper["safe_test_env"](
+                        repo,
+                        root / "second-test-home",
+                    )["COMSPEC"],
+                    expected,
+                )
+
     def test_boolean_environment_values_fail_closed(self) -> None:
         with mock.patch.dict(os.environ, {"AUTOREVIEW_TEST_BOOL": "flase"}):
             with self.assertRaisesRegex(SystemExit, "invalid boolean environment value"):

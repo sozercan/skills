@@ -955,7 +955,7 @@ def subprocess_env(extra: dict[str, str] | None) -> dict[str, str] | None:
 
 
 def safe_git_env(repo: Path) -> dict[str, str]:
-    platform_keys = ("COMSPEC", "PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "WINDIR")
+    platform_keys = ("PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "WINDIR")
     env = {
         key: os.environ[key]
         for key in platform_keys
@@ -973,6 +973,8 @@ def safe_git_env(repo: Path) -> dict[str, str]:
         "LC_ALL": "C.UTF-8",
         "PATH": safe_engine_path(repo),
     })
+    if comspec := safe_comspec(repo):
+        env["COMSPEC"] = comspec
     return env
 
 
@@ -1045,6 +1047,18 @@ def safe_engine_path(repo: Path, extra_paths: list[Path] | None = None) -> str:
     for path in DEFAULT_ENGINE_PATHS:
         add(path)
     return os.pathsep.join(entries)
+
+
+def safe_comspec(repo: Path) -> str | None:
+    configured = os.environ.get("COMSPEC")
+    if configured:
+        resolved = find_command(configured, repo)
+        if resolved:
+            return resolved
+    if os.name == "nt" and (system_root := os.environ.get("SYSTEMROOT")):
+        candidate = Path(system_root) / "System32" / "cmd.exe"
+        return first_executable_candidate(candidate, reject_root=repo.resolve())
+    return None
 
 
 def codex_tool_git_env() -> dict[str, str]:
@@ -1142,7 +1156,6 @@ def safe_engine_env(
 ) -> dict[str, str]:
     common_allowed_exact = {
         "ALL_PROXY",
-        "COMSPEC",
         "DISABLE_AUTOUPDATER",
         "DISABLE_ERROR_REPORTING",
         "DISABLE_TELEMETRY",
@@ -1318,6 +1331,9 @@ def safe_engine_env(
                 "configure a credential-free proxy URL before running autoreview"
             )
     env["PATH"] = safe_engine_path(repo, extra_paths)
+    env.pop("COMSPEC", None)
+    if comspec := safe_comspec(repo):
+        env["COMSPEC"] = comspec
     for key in ("HOME", "USERPROFILE"):
         value = os.environ.get(key)
         if value and external_env_path(repo, value):
@@ -1576,6 +1592,9 @@ def safe_test_env(repo: Path, isolated_home: Path) -> dict[str, str]:
         if key in TEST_ENV_ALLOWED_EXACT
         or any(key.startswith(prefix) for prefix in TEST_ENV_ALLOWED_PREFIXES)
     }
+    env.pop("COMSPEC", None)
+    if comspec := safe_comspec(repo):
+        env["COMSPEC"] = comspec
     for key in (
         "ALL_PROXY",
         "HTTP_PROXY",
