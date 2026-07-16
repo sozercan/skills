@@ -302,6 +302,34 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     ["hostile-gitconfig", "visible.txt"],
                 )
 
+    def test_untracked_files_ignore_repo_controlled_global_excludes(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            hidden = repo / "hidden.local"
+            hidden.write_text("review me\n", encoding="utf-8")
+            local_excludes = repo / "local-excludes"
+            local_excludes.write_text("hidden.local\n", encoding="utf-8")
+            git(repo, "config", "core.excludesFile", str(local_excludes))
+
+            self.assertTrue(self.helper["is_dirty"](repo))
+            self.assertIn("hidden.local", self.helper["safe_untracked_files"](repo))
+
+            git(repo, "config", "--unset", "core.excludesFile")
+            repo_home = repo / "home"
+            xdg_ignore = repo_home / ".config" / "git" / "ignore"
+            xdg_ignore.parent.mkdir(parents=True)
+            xdg_ignore.write_text("hidden.local\n", encoding="utf-8")
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": str(repo_home), "USERPROFILE": str(repo_home)},
+            ):
+                self.assertTrue(self.helper["is_dirty"](repo))
+                self.assertIn(
+                    "hidden.local",
+                    self.helper["safe_untracked_files"](repo),
+                )
+
     def test_dirty_check_forces_untracked_files_visible(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
@@ -3827,6 +3855,19 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 "review\n",
             )
             self.assertFalse((repo / "~").exists())
+
+    def test_output_paths_must_be_distinct_after_normalization(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            outside = root / "review.txt"
+            args = argparse.Namespace(
+                json_output=str(outside),
+                output=str(root / "." / "review.txt"),
+            )
+
+            with self.assertRaisesRegex(SystemExit, "must point to different files"):
+                self.helper["reject_repo_output_paths"](args, repo)
 
     def test_atomic_output_replaces_hard_link_without_touching_repo_file(
         self,

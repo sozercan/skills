@@ -879,9 +879,8 @@ def global_excludes_file(repo: Path) -> Path | None:
 
 
 def global_excludes_git_args(repo: Path) -> list[str]:
-    if excludes_file := global_excludes_file(repo):
-        return ["-c", f"core.excludesFile={excludes_file}"]
-    return []
+    excludes_file = global_excludes_file(repo) or Path(os.devnull)
+    return ["-c", f"core.excludesFile={excludes_file}"]
 
 
 def safe_engine_path(repo: Path, extra_paths: list[Path] | None = None) -> str:
@@ -9894,6 +9893,20 @@ def reject_repo_output_paths(args: argparse.Namespace, repo: Path) -> None:
                 f"{display_escape(value, 500)}"
             )
         setattr(args, attribute, str(resolved))
+
+    if args.json_output and args.output:
+        json_path = Path(args.json_output)
+        output_path = Path(args.output)
+        same_path = json_path == output_path
+        if not same_path:
+            try:
+                same_path = os.path.samefile(json_path, output_path)
+            except OSError:
+                pass
+        if same_path:
+            raise SystemExit(
+                "--json-output and --output must point to different files"
+            )
 
 
 def atomic_write_text(path: Path, content: str) -> None:
