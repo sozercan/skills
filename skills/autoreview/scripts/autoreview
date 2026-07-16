@@ -10005,8 +10005,13 @@ def main() -> int:
     repo = repo_root()
     reject_repo_output_paths(args, repo)
     target, target_ref = choose_target(repo, args.mode, args.base)
+    branch = current_branch(repo)
+    display_ref = args.commit if target == "commit" else target_ref
+    require_no_secret_values("current branch", branch)
+    if display_ref:
+        require_no_secret_values("review target ref", display_ref)
     print(f"autoreview target: {target}")
-    print(f"branch: {current_branch(repo)}")
+    print(f"branch: {display_escape(branch, 500)}")
     if len(reviewers) == 1 and not args.reviewers and not args.panel:
         print(f"engine: {reviewers[0].engine}")
         if reviewers[0].model:
@@ -10028,9 +10033,8 @@ def main() -> int:
     tools_label = "mixed" if len(tool_states) > 1 else ("on" if tool_states.pop() else "off")
     print(f"tools: {tools_label}")
     print(f"web_search: {'on' if args.web_search else 'off'}")
-    display_ref = args.commit if target == "commit" else target_ref
     if display_ref:
-        print(f"ref: {display_ref}")
+        print(f"ref: {display_escape(display_ref, 500)}")
     if args.dry_run:
         return 0
 

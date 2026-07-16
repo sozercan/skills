@@ -4110,6 +4110,64 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 before,
             )
 
+    def test_cli_dry_run_rejects_secret_like_branch_and_ref_before_printing(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            source = repo / "source.txt"
+            source.write_text("base\n", encoding="utf-8")
+            git(repo, "add", "source.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            secret = "ghp_" + "A" * 24
+            secret_branch = "feature-" + secret
+            git(repo, "branch", "-M", secret_branch)
+
+            branch_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--mode",
+                    "branch",
+                    "--base",
+                    "HEAD",
+                    "--dry-run",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(branch_result.returncode, 0)
+            self.assertIn("clean or redact current branch", branch_result.stderr)
+            self.assertNotIn(secret, branch_result.stdout)
+            self.assertNotIn(secret, branch_result.stderr)
+
+            git(repo, "branch", "-M", "main")
+            secret_ref = "refs/heads/base-" + secret
+            git(repo, "update-ref", secret_ref, "HEAD")
+            ref_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--mode",
+                    "branch",
+                    "--base",
+                    secret_ref.removeprefix("refs/heads/"),
+                    "--dry-run",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(ref_result.returncode, 0)
+            self.assertIn("clean or redact review target ref", ref_result.stderr)
+            self.assertNotIn(secret, ref_result.stdout)
+            self.assertNotIn(secret, ref_result.stderr)
+
     @unittest.skipIf(os.name == "nt", "the true command is POSIX-only")
     def test_cli_parallel_tests_supports_unborn_repository(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
