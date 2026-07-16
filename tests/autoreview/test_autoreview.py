@@ -18,7 +18,8 @@ from unittest import mock
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "skills" / "autoreview" / "scripts" / "autoreview"
 LOADER = SourceFileLoader("autoreview_module", str(SCRIPT_PATH))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
-assert SPEC is not None
+if SPEC is None:
+    raise RuntimeError(f"unable to load autoreview module spec from {SCRIPT_PATH}")
 AUTOREVIEW = importlib.util.module_from_spec(SPEC)
 LOADER.exec_module(AUTOREVIEW)
 

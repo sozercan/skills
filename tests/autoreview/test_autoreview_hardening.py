@@ -79,6 +79,38 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.helper = load_helper()
 
+    @unittest.skipIf(os.name == "nt", "POSIX shell wrapper behavior")
+    def test_shell_harness_rejects_non_python3_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            wrapper = root / "test-review-harness"
+            harness = root / "test-review-harness.py"
+            shutil.copy2(SCRIPT.with_name("test-review-harness"), wrapper)
+            harness.write_text("raise SystemExit(99)\n", encoding="utf-8")
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_python = bin_dir / "python"
+            fake_python.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = -c ]; then exit 1; fi\n"
+                "exit 99\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir)
+
+            result = subprocess.run(
+                ["/bin/bash", str(wrapper)],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 127, result.stderr)
+            self.assertIn("Python 3 is required", result.stderr)
+
     def test_powershell_harness_exposes_runnable_engines_only(self) -> None:
         harness = SCRIPT.with_name("test-review-harness.ps1").read_text(encoding="utf-8")
 
