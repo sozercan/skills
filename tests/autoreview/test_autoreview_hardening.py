@@ -121,6 +121,48 @@ class AutoreviewHardeningTests(unittest.TestCase):
             self.assertIn("usage: autoreview", result.stdout)
             self.assertFalse(marker.exists())
 
+    @unittest.skipIf(os.name == "nt", "POSIX bootstrap behavior")
+    def test_python_launchers_isolate_checkout_modules(self) -> None:
+        trusted_python = Path(sys.executable).resolve()
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            scripts = repo / "skill" / "scripts"
+            scripts.mkdir(parents=True)
+            marker = root / "checkout-module-imported"
+            hostile_module = (
+                "from pathlib import Path\n"
+                f"Path({str(marker)!r}).write_text('imported', encoding='utf-8')\n"
+                "raise RuntimeError('checkout module imported')\n"
+            )
+            (scripts / "argparse.py").write_text(hostile_module, encoding="utf-8")
+            main_helper = scripts / "autoreview"
+            harness_wrapper = scripts / "test-review-harness"
+            harness_python = scripts / "test-review-harness.py"
+            shutil.copy2(SCRIPT, main_helper)
+            shutil.copy2(SCRIPT.with_name("test-review-harness"), harness_wrapper)
+            shutil.copy2(SCRIPT.with_name("test-review-harness.py"), harness_python)
+            for executable in (main_helper, harness_wrapper):
+                executable.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = os.pathsep.join(
+                (str(trusted_python.parent), "/usr/bin", "/bin")
+            )
+            env["PYTHONPATH"] = str(scripts)
+
+            for executable in (main_helper, harness_wrapper):
+                with self.subTest(executable=executable.name):
+                    result = subprocess.run(
+                        [str(executable), "--help"],
+                        cwd=repo,
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse(marker.exists())
+
     @unittest.skipIf(os.name == "nt", "POSIX shell wrapper behavior")
     def test_shell_harness_ignores_repo_local_python(self) -> None:
         trusted_python = Path(sys.executable).resolve()
@@ -249,6 +291,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertNotIn("result.Substring(4)", harness)
         self.assertIn("return $Lexical", harness)
         self.assertIn("$LASTEXITCODE -eq 0", harness)
+        self.assertIn("-3 -I -c", harness)
+        self.assertIn("& $Python -I $Harness", harness)
         self.assertIn("exit 127", harness)
         for disabled_engine in ("droid", "copilot", "opencode", "cursor"):
             self.assertNotIn(f"'{disabled_engine}'", harness)
@@ -393,26 +437,27 @@ class AutoreviewHardeningTests(unittest.TestCase):
                             check=False,
                         )
 
-            valid_repeated_path = repeated_link / "repeat"
-            valid_env = os.environ.copy()
-            valid_env["PATH"] = str(valid_repeated_path)
-            valid_result = subprocess.run(
-                [
-                    powershell,
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-File",
-                    str(SCRIPT.with_name("test-review-harness.ps1")),
-                    "-Help",
-                ],
-                cwd=repo_root,
-                env=valid_env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(valid_result.returncode, 0, valid_result.stderr)
-            self.assertIn("usage: test-review-harness", valid_result.stdout)
+            if os.name != "nt":
+                valid_repeated_path = repeated_link / "repeat"
+                valid_env = os.environ.copy()
+                valid_env["PATH"] = str(valid_repeated_path)
+                valid_result = subprocess.run(
+                    [
+                        powershell,
+                        "-NoLogo",
+                        "-NoProfile",
+                        "-File",
+                        str(SCRIPT.with_name("test-review-harness.ps1")),
+                        "-Help",
+                    ],
+                    cwd=repo_root,
+                    env=valid_env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(valid_result.returncode, 0, valid_result.stderr)
+                self.assertIn("usage: test-review-harness", valid_result.stdout)
 
     def test_local_bundle_blocks_sensitive_untracked_file(self) -> None:
         for rel in (".env", "tokens/session.dat", "secrets/local.py"):
@@ -702,6 +747,27 @@ class AutoreviewHardeningTests(unittest.TestCase):
                         self.helper["choose_target"](repo, "auto", None),
                         ("branch", f"origin/{default_name}"),
                     )
+
+    def test_default_branch_does_not_guess_between_main_and_master(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            git(repo, "branch", "-M", "master")
+            head = git(repo, "rev-parse", "HEAD").strip()
+            git(repo, "update-ref", "refs/remotes/origin/main", head)
+            git(repo, "update-ref", "refs/remotes/origin/master", head)
+
+            self.assertEqual(
+                self.helper["default_branch"](repo),
+                ("master", "master"),
+            )
+            with mock.patch.dict(
+                self.helper["choose_target"].__globals__,
+                {"detect_pr_base": lambda _repo: None},
+            ), self.assertRaisesRegex(SystemExit, "clean default-branch checkout"):
+                self.helper["choose_target"](repo, "auto", None)
 
     def test_auto_mode_prefers_explicit_and_pr_base_on_default_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -5038,6 +5104,45 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("autoreview clean", result.stdout)
+
+    def test_parallel_tests_require_the_committed_target_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            source = repo / "source.txt"
+            source.write_text("first\n", encoding="utf-8")
+            git(repo, "add", "source.txt")
+            git(repo, "commit", "-q", "-m", "first")
+            first = git(repo, "rev-parse", "HEAD").strip()
+            source.write_text("dirty fix\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(SystemExit, "requires a clean checkout"):
+                self.helper["validate_parallel_test_target"](
+                    repo,
+                    "commit",
+                    "HEAD",
+                )
+
+            git(repo, "reset", "--hard", "-q", "HEAD")
+            source.write_text("second\n", encoding="utf-8")
+            git(repo, "commit", "-qam", "second")
+            with self.assertRaisesRegex(SystemExit, "resolve to HEAD"):
+                self.helper["validate_parallel_test_target"](
+                    repo,
+                    "commit",
+                    first,
+                )
+
+            self.helper["validate_parallel_test_target"](
+                repo,
+                "branch",
+                "HEAD",
+            )
+            source.write_text("local review\n", encoding="utf-8")
+            self.helper["validate_parallel_test_target"](
+                repo,
+                "local",
+                "HEAD",
+            )
 
     @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
     def test_cli_detects_source_mutation_without_parallel_tests(self) -> None:

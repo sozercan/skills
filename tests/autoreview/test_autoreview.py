@@ -159,10 +159,15 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
     def test_harness_disables_fixture_commit_signing(self) -> None:
         harness_path = SCRIPT_PATH.with_name("test-review-harness.py")
         namespace = runpy.run_path(str(harness_path))
-        commands: list[list[str]] = []
+        invocations: list[tuple[list[str], dict[str, str] | None]] = []
 
-        def record(command: list[str], _cwd: Path) -> None:
-            commands.append(command)
+        def record(
+            command: list[str],
+            _cwd: Path,
+            *,
+            env: dict[str, str] | None = None,
+        ) -> None:
+            invocations.append((command, env))
 
         with tempfile.TemporaryDirectory() as tempdir, mock.patch.dict(
             namespace["create_fixture_repo"].__globals__,
@@ -170,7 +175,21 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
         ):
             namespace["create_fixture_repo"](Path(tempdir), "benign", "/trusted/git")
 
+        commands = [command for command, _env in invocations]
         self.assertTrue(all(command[0] == "/trusted/git" for command in commands))
+        self.assertTrue(
+            all(
+                command[1:4]
+                == ["--no-optional-locks", "-c", "core.fsmonitor=false"]
+                for command in commands
+            )
+        )
+        for _command, env in invocations:
+            self.assertIsNotNone(env)
+            assert env is not None
+            self.assertEqual(env["GIT_CONFIG_GLOBAL"], os.devnull)
+            self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
+            self.assertNotIn("GIT_CONFIG_COUNT", env)
         commit = next(command for command in commands if "commit" in command)
         hooks_config = next(
             command
@@ -178,8 +197,20 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             if "core.hooksPath" in command
         )
         self.assertIn("commit.gpgSign=false", commit)
-        self.assertEqual(hooks_config[:3], ["/trusted/git", "config", "core.hooksPath"])
-        self.assertTrue(hooks_config[3].endswith(".empty-hooks"))
+        hooks_index = hooks_config.index("core.hooksPath")
+        self.assertTrue(hooks_config[hooks_index + 1].endswith(".empty-hooks"))
+
+    def test_reviewer_args_ignores_unselected_fallback_env_default(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"AUTOREVIEW_CLAUDE_FALLBACK_MODEL": "claude-env-fallback"},
+            clear=True,
+        ):
+            reviewer = AUTOREVIEW.reviewer_args(
+                AUTOREVIEW.reviewer_test_args(engine="codex")
+            )[0]
+
+        self.assertEqual(reviewer.fallback_model, "gpt-5.6-terra")
 
     def test_reviewer_args_rejects_unused_keyed_model_and_thinking(self) -> None:
         for option, values in (

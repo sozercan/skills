@@ -105,8 +105,8 @@ for interpreter_name in python3 python; do
     candidate=$(resolve_candidate "$path_entry/$interpreter_name" || true)
     [ -n "$candidate" ] || continue
     is_in_checkout "$candidate" && continue
-    if "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
-      exec "$candidate" "$harness" "$@"
+    if "$candidate" -I -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
+      exec "$candidate" -I "$harness" "$@"
     fi
   done
   IFS=$old_ifs

@@ -339,17 +339,17 @@ if ($PSBoundParameters.ContainsKey('Engine')) {
 }
 
 foreach ($PyLauncher in Get-ExternalApplications 'py') {
-    & $PyLauncher -3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' *> $null
+    & $PyLauncher -3 -I -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' *> $null
     if ($LASTEXITCODE -eq 0) {
-        & $PyLauncher -3 $Harness @ForwardedArgs
+        & $PyLauncher -3 -I $Harness @ForwardedArgs
         exit $LASTEXITCODE
     }
 }
 
 foreach ($Python in Get-ExternalApplications 'python') {
-    & $Python -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' *> $null
+    & $Python -I -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' *> $null
     if ($LASTEXITCODE -eq 0) {
-        & $Python $Harness @ForwardedArgs
+        & $Python -I $Harness @ForwardedArgs
         exit $LASTEXITCODE
     }
 }

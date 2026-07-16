@@ -246,6 +246,13 @@ printed before execution. Set `OPENCLAW_TESTBOX=1` on the autoreview process, no
 inside the test command, because the environment snapshot and credential staging
 happen before the test shell starts:
 
+For branch and commit reviews, the checkout must be clean before using
+`--parallel-tests`; commit review also requires `--commit` to resolve to `HEAD`.
+This prevents tests from passing against unreviewed working-tree edits or a
+different commit. Use a checkout at the reviewed commit or run tests separately
+when those conditions do not hold. Local-mode parallel tests continue to run
+against the dirty local target being reviewed.
+
 ```bash
 OPENCLAW_TESTBOX=1 "$AUTOREVIEW" --parallel-tests "pnpm check:changed"
 ```
@@ -405,7 +412,7 @@ The smoke harness has thin shell wrappers over a shared Python implementation:
 On native Windows, invoke the extensionless Python helper through Python:
 
 ```powershell
-python $AUTOREVIEW --help
+python -I $AUTOREVIEW --help
 ```
 
 and the smoke harness:

@@ -105,8 +105,8 @@ for interpreter_name in python3 python; do
     candidate=$(resolve_candidate "$path_entry/$interpreter_name" || true)
     [ -n "$candidate" ] || continue
     is_in_checkout "$candidate" && continue
-    if "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
-      exec "$candidate" "$0" "$@"
+    if "$candidate" -I -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
+      exec "$candidate" -I "$0" "$@"
     fi
   done
   IFS=$old_ifs
@@ -2043,12 +2043,15 @@ def default_branch(repo: Path) -> tuple[str, str] | None:
     if remote_head.startswith("origin/") and resolved(remote_head):
         return remote_head.removeprefix("origin/"), remote_head
 
+    conventional_refs: list[tuple[str, str]] = []
     for candidate in ("main", "master"):
         remote_ref = f"origin/{candidate}"
         if resolved(remote_ref):
-            return candidate, remote_ref
-        if resolved(candidate):
-            return candidate, candidate
+            conventional_refs.append((candidate, remote_ref))
+        elif resolved(candidate):
+            conventional_refs.append((candidate, candidate))
+    if len(conventional_refs) == 1:
+        return conventional_refs[0]
 
     remote_branches = [
         ref
@@ -9568,6 +9571,28 @@ def start_parallel_tests(
     return proc, time.time()
 
 
+def validate_parallel_test_target(
+    repo: Path,
+    target: str,
+    commit_ref: str,
+) -> None:
+    if target == "local":
+        return
+    if is_dirty(repo):
+        raise SystemExit(
+            "--parallel-tests for branch or commit review requires a clean "
+            "checkout so tests run against the reviewed target"
+        )
+    if target == "commit":
+        commit_oid = validate_git_ref(repo, commit_ref, "commit")
+        head_oid = validate_git_ref(repo, "HEAD", "HEAD")
+        if commit_oid != head_oid:
+            raise SystemExit(
+                "--parallel-tests for commit review requires --commit to "
+                "resolve to HEAD; check out the commit or run its tests separately"
+            )
+
+
 def relay_parallel_test_stderr(stream: Any, java_tool_options: str) -> None:
     suppressed = {
         f"Picked up JAVA_TOOL_OPTIONS: {java_tool_options}",
@@ -9826,8 +9851,9 @@ def reviewer_args(args: argparse.Namespace) -> list[argparse.Namespace]:
             raise SystemExit(
                 f"--{option} specified for unselected reviewer: {engine_list}"
             )
-    fallback_engines = set(fallback_by_engine) | set(env_fallback_by_engine)
-    unused_fallback_engines = fallback_engines - selected_engines
+    selected_env_fallback_engines = set(env_fallback_by_engine) & selected_engines
+    fallback_engines = set(fallback_by_engine) | selected_env_fallback_engines
+    unused_fallback_engines = set(fallback_by_engine) - selected_engines
     if unused_fallback_engines:
         engine_list = ", ".join(sorted(unused_fallback_engines))
         raise SystemExit(f"--fallback-model specified for unselected reviewer: {engine_list}")
@@ -10278,12 +10304,12 @@ def self_test_fallback_scope() -> None:
                 raise
         os.environ.pop("AUTOREVIEW_FALLBACK_MODEL")
         os.environ["AUTOREVIEW_CLAUDE_FALLBACK_MODEL"] = "env-claude-only"
-        try:
-            reviewer_args(reviewer_test_args(engine="codex"))
-            raise SystemExit("self-test fallback scope failed: Claude fallback env without Claude should be rejected")
-        except SystemExit as exc:
-            if "unselected reviewer: claude" not in str(exc):
-                raise
+        codex_only = reviewer_args(reviewer_test_args(engine="codex"))[0]
+        if codex_only.fallback_model != "gpt-5.6-terra":
+            raise SystemExit(
+                "self-test fallback scope failed: unselected Claude env fallback "
+                "should not affect Codex"
+            )
         os.environ["AUTOREVIEW_FALLBACK_MODEL"] = "env-global-fallback"
         os.environ.pop("AUTOREVIEW_CLAUDE_FALLBACK_MODEL")
         os.environ["AUTOREVIEW_CODEX_FALLBACK_MODEL"] = "env-codex-fallback"
@@ -10544,6 +10570,9 @@ def main() -> int:
         print(f"ref: {display_escape(display_ref, 500)}")
     if args.dry_run:
         return 0
+
+    if args.parallel_tests:
+        validate_parallel_test_target(repo, target, args.commit)
 
     review_source_snapshot = review_input_snapshot(
         repo, target, target_ref, args.commit
