@@ -55,6 +55,10 @@ def init_repo(tempdir: Path) -> Path:
     git(repo, "init", "-q")
     git(repo, "config", "user.name", "Autoreview Test")
     git(repo, "config", "user.email", "autoreview@example.invalid")
+    hooks = repo / ".git" / "autoreview-test-hooks"
+    hooks.mkdir()
+    git(repo, "config", "core.hooksPath", str(hooks))
+    git(repo, "config", "commit.gpgSign", "false")
     return repo
 
 
@@ -110,6 +114,18 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 127, result.stderr)
             self.assertIn("Python 3 is required", result.stderr)
+
+    def test_init_repo_isolates_signing_and_hooks(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+
+            self.assertEqual(
+                git(repo, "config", "--get", "commit.gpgSign").strip(),
+                "false",
+            )
+            hooks = Path(git(repo, "config", "--get", "core.hooksPath").strip())
+            self.assertTrue(hooks.is_dir())
+            self.assertTrue(hooks.is_relative_to(repo / ".git"))
 
     def test_powershell_harness_exposes_runnable_engines_only(self) -> None:
         harness = SCRIPT.with_name("test-review-harness.ps1").read_text(encoding="utf-8")

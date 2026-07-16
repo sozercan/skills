@@ -683,6 +683,18 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
             subprocess.run(["git", "config", "user.name", "AutoReview Test"], cwd=repo, check=True)
             subprocess.run(["git", "config", "user.email", "autoreview@example.invalid"], cwd=repo, check=True)
+            hooks = repo / ".git" / "autoreview-test-hooks"
+            hooks.mkdir()
+            subprocess.run(
+                ["git", "config", "core.hooksPath", str(hooks)],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "commit.gpgSign", "false"],
+                cwd=repo,
+                check=True,
+            )
             source = repo / "example.txt"
             source.write_text("before\n")
             subprocess.run(["git", "add", "example.txt"], cwd=repo, check=True)
