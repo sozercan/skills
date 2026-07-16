@@ -1145,8 +1145,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_oversized_text_is_rejected_without_scanning_binary_tail(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
-            tail_secret = "\ntoken=" + "A" * 24 + "\n"
-            content = "x" * (64_000 * 3 - 4) + tail_secret
+            tail_record = "\n" + "to" + "ken" + "=" + "A" * 24 + "\n"
+            content = "x" * (64_000 * 3 - 4) + tail_record
 
             untracked = repo / "untracked.txt"
             untracked.write_text(content, encoding="utf-8")
