@@ -2103,6 +2103,7 @@ def default_branch(repo: Path) -> tuple[str, str] | None:
 
 
 def is_dirty(repo: Path) -> bool:
+    require_visible_local_index(repo)
     return bool(
         git(
             repo,
@@ -6240,6 +6241,35 @@ def safe_untracked_files(repo: Path) -> list[str]:
     return [rel for rel, _content, _truncated in safe_untracked_file_snapshots(repo)]
 
 
+def require_visible_local_index(repo: Path) -> None:
+    hidden: list[tuple[str, list[str]]] = []
+    for record in git(repo, "ls-files", "-v", "-z").split("\0"):
+        if not record:
+            continue
+        if len(record) < 3 or record[1] != " ":
+            raise SystemExit("unable to safely parse Git index visibility flags")
+        marker = record[0]
+        flags: list[str] = []
+        if marker.lower() == "s":
+            flags.append("skip-worktree")
+        if marker.islower():
+            flags.append("assume-unchanged")
+        if flags:
+            hidden.append((record[2:], flags))
+    if hidden:
+        details = "\n".join(
+            f"- {display_escape(path, 500)} ({', '.join(flags)})"
+            for path, flags in hidden[:20]
+        )
+        more = f"\n... {len(hidden) - 20} more" if len(hidden) > 20 else ""
+        raise SystemExit(
+            "refusing local review while tracked paths use index visibility "
+            "flags that can hide working-tree changes; clear assume-unchanged "
+            "and skip-worktree first:\n"
+            f"{details}{more}"
+        )
+
+
 def local_status(repo: Path, untracked: list[str]) -> str:
     status = git(repo, "status", "--short", "--untracked-files=no").rstrip()
     lines = [status] if status else []
@@ -6248,6 +6278,7 @@ def local_status(repo: Path, untracked: list[str]) -> str:
 
 
 def local_bundle(repo: Path) -> tuple[str, bool]:
+    require_visible_local_index(repo)
     staged_patch = git(repo, "diff", *SAFE_DIFF_FLAGS, "--cached", "--patch")
     unstaged_patch = git(repo, "diff", *SAFE_DIFF_FLAGS, "--patch")
     require_no_binary_diff(

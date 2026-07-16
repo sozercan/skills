@@ -712,6 +712,26 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 ("local", None),
             )
 
+    def test_local_review_rejects_hidden_index_flags(self) -> None:
+        for option, expected in (
+            ("--assume-unchanged", "assume-unchanged"),
+            ("--skip-worktree", "skip-worktree"),
+        ):
+            with self.subTest(option=option), tempfile.TemporaryDirectory() as tempdir:
+                repo = init_repo(Path(tempdir))
+                git(repo, "config", "core.autocrlf", "false")
+                source = repo / "source.txt"
+                source.write_text("base\n", encoding="utf-8")
+                git(repo, "add", "source.txt")
+                git(repo, "commit", "-q", "-m", "base")
+                git(repo, "update-index", option, "source.txt")
+                source.write_text("hidden change\n", encoding="utf-8")
+
+                with self.assertRaisesRegex(SystemExit, expected):
+                    self.helper["is_dirty"](repo)
+                with self.assertRaisesRegex(SystemExit, expected):
+                    self.helper["local_bundle"](repo)
+
     def test_auto_mode_uses_actual_default_branch(self) -> None:
         for default_name in ("master", "trunk"):
             with self.subTest(default_name=default_name), tempfile.TemporaryDirectory() as tempdir:
