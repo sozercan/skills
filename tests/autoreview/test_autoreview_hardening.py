@@ -378,6 +378,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
         for default_name in ("master", "trunk"):
             with self.subTest(default_name=default_name), tempfile.TemporaryDirectory() as tempdir:
                 repo = init_repo(Path(tempdir))
+                git(repo, "config", "core.autocrlf", "false")
                 (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
                 git(repo, "add", "tracked.txt")
                 git(repo, "commit", "-q", "-m", "base")
@@ -3351,12 +3352,11 @@ class AutoreviewHardeningTests(unittest.TestCase):
             result = subprocess.run(
                 ["git", "hash-object", "-t", "commit", "-w", "--stdin"],
                 cwd=repo,
-                input=commit_text,
-                text=True,
+                input=commit_text.encode("utf-8"),
                 check=True,
                 stdout=subprocess.PIPE,
             )
-            commit = result.stdout.strip()
+            commit = result.stdout.decode("ascii").strip()
             git(repo, "update-ref", "HEAD", commit)
             marker = root / "gpg-invoked"
             gpg = self.helper["write_executable"](
