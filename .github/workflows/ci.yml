@@ -56,6 +56,41 @@ jobs:
       - name: Fast tests
         run: make test
 
+  autoreview-windows:
+    name: Autoreview tests (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # actions/checkout@v7.0.0
+
+      - name: Show tool versions
+        shell: pwsh
+        run: |
+          python --version
+          git --version
+          $PSVersionTable.PSVersion
+
+      - name: Lint autoreview Python
+        shell: pwsh
+        run: |
+          python -m py_compile `
+            skills/autoreview/scripts/autoreview `
+            skills/autoreview/scripts/test-review-harness.py `
+            tests/autoreview/test_autoreview.py `
+            tests/autoreview/test_autoreview_hardening.py
+
+      - name: Run autoreview tests
+        shell: pwsh
+        run: |
+          python skills/autoreview/scripts/autoreview --self-test
+          python -m unittest discover -s tests/autoreview -p 'test_*.py'
+
+      - name: Exercise PowerShell harness wrapper
+        shell: pwsh
+        run: |
+          & ./skills/autoreview/scripts/test-review-harness.ps1 -Help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   e2e:
     name: Real kind multi-worktree E2E
     runs-on: ubuntu-latest

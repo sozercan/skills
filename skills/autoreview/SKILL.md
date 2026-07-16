@@ -404,7 +404,7 @@ The helper:
 - chooses dirty local changes first
 - accepts `--mode uncommitted` as an alias for `--mode local`
 - otherwise uses current PR base if `gh pr view` works
-- otherwise uses `origin/main` for non-main branches
+- otherwise uses the detected default ref (for example `origin/main`, `origin/master`, the remote `origin/HEAD` target, or an unambiguous local default branch)
 - does not fetch automatically during branch review; the selected base ref must already resolve locally
 - recognizes `--engine droid`, `copilot`, `cursor`, and `opencode` only to fail closed with isolation errors; runnable engines are `codex`, `claude`, and `pi`; default is `AUTOREVIEW_ENGINE` or `codex`
 - resolves bare `git`, `gh`, reviewer, and PowerShell shell commands from absolute `PATH` entries only, never from the reviewed checkout; explicit `--*-bin` paths are interpreted from the reviewed repository root when relative and accepted only when both the supplied path and resolved target stay outside the reviewed repository
