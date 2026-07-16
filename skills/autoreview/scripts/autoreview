@@ -6103,6 +6103,51 @@ def diff_marker_path(value: str) -> str | None:
     return value[2:]
 
 
+def git_diff_header_tokens(value: str) -> list[str]:
+    tokens: list[str] = []
+    cursor = 0
+    while cursor < len(value):
+        while cursor < len(value) and value[cursor] == " ":
+            cursor += 1
+        if cursor >= len(value):
+            break
+        start = cursor
+        if value[cursor] == '"':
+            cursor += 1
+            escaped = False
+            while cursor < len(value):
+                char = value[cursor]
+                cursor += 1
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    break
+            else:
+                return []
+        else:
+            while cursor < len(value) and value[cursor] != " ":
+                cursor += 1
+        tokens.append(value[start:cursor])
+    return tokens
+
+
+def diff_header_paths(line: str) -> tuple[str | None, str | None]:
+    if not line.startswith("diff --git "):
+        return None, None
+    tokens = git_diff_header_tokens(line.removeprefix("diff --git "))
+    if len(tokens) != 2:
+        return None, None
+    return diff_marker_path(tokens[0]), diff_marker_path(tokens[1])
+
+
+def diff_metadata_path(value: str) -> str | None:
+    if value.startswith('"'):
+        return git_c_unquote(value)
+    return value or None
+
+
 def diff_section_paths(section: str) -> tuple[str | None, str | None]:
     old_path: str | None = None
     new_path: str | None = None
@@ -6114,6 +6159,113 @@ def diff_section_paths(section: str) -> tuple[str | None, str | None]:
         elif line.startswith("+++ "):
             new_path = diff_marker_path(line[4:])
     return old_path, new_path
+
+
+def reportable_lines_from_bundle(
+    bundle: str,
+    changed_paths: set[str] | None = None,
+) -> dict[str, set[int]]:
+    reportable: dict[str, set[int]] = {}
+    old_path: str | None = None
+    new_path: str | None = None
+    old_line = 0
+    new_line = 0
+    in_hunk = False
+    in_diff = False
+    in_untracked_file = False
+    untracked_path: str | None = None
+    diff_paths: set[str] = set()
+    hunk_pattern = re.compile(
+        r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@"
+    )
+    for line in bundle.split("\n"):
+        if line.startswith(DIFF_SECTION_PREFIXES):
+            old_path, new_path = diff_header_paths(line)
+            for path in (old_path, new_path):
+                if path is not None:
+                    diff_paths.add(path)
+            in_hunk = False
+            in_diff = True
+            in_untracked_file = False
+            untracked_path = None
+            continue
+        if line == "# Untracked File":
+            old_path = None
+            new_path = None
+            in_hunk = False
+            in_diff = False
+            in_untracked_file = True
+            untracked_path = None
+            continue
+        if line.startswith("# "):
+            in_diff = False
+            in_hunk = False
+            in_untracked_file = False
+            untracked_path = None
+            continue
+        if in_untracked_file and line.startswith("path: "):
+            try:
+                parsed_path = json.loads(line.removeprefix("path: "))
+            except json.JSONDecodeError:
+                parsed_path = None
+            untracked_path = parsed_path if isinstance(parsed_path, str) else None
+            continue
+        if in_untracked_file and untracked_path is not None:
+            source_line = re.match(r"^source-line (\d+): ", line)
+            if source_line:
+                reportable.setdefault(untracked_path, set()).add(
+                    int(source_line.group(1))
+                )
+            continue
+        if not in_diff:
+            continue
+        if not in_hunk and line.startswith("--- "):
+            old_path = diff_marker_path(line[4:])
+            if old_path is not None:
+                diff_paths.add(old_path)
+            continue
+        if not in_hunk and line.startswith("+++ "):
+            new_path = diff_marker_path(line[4:])
+            if new_path is not None:
+                diff_paths.add(new_path)
+            continue
+        if not in_hunk and line.startswith(("rename from ", "copy from ")):
+            old_path = diff_metadata_path(line.split(" ", 2)[2])
+            if old_path is not None:
+                diff_paths.add(old_path)
+            continue
+        if not in_hunk and line.startswith(("rename to ", "copy to ")):
+            new_path = diff_metadata_path(line.split(" ", 2)[2])
+            if new_path is not None:
+                diff_paths.add(new_path)
+            continue
+        hunk = hunk_pattern.match(line)
+        if hunk:
+            old_line = int(hunk.group(1))
+            new_line = int(hunk.group(2))
+            in_hunk = True
+            continue
+        if not in_hunk or not line:
+            continue
+        effective_paths = {path for path in (old_path, new_path) if path is not None}
+        marker = line[0]
+        if marker == " ":
+            old_line += 1
+            new_line += 1
+        elif marker == "-":
+            for path in effective_paths:
+                reportable.setdefault(path, set()).add(max(old_line, 1))
+            old_line += 1
+        elif marker == "+":
+            for path in effective_paths:
+                reportable.setdefault(path, set()).add(max(new_line, 1))
+            new_line += 1
+        elif not line.startswith("\\ No newline at end of file"):
+            in_hunk = False
+    for path in diff_paths | (changed_paths or set()):
+        if not reportable.get(path):
+            reportable.setdefault(path, set()).add(1)
+    return reportable
 
 
 def validate_review_patch(
@@ -6754,6 +6906,8 @@ def commit_bundle(repo: Path, commit_ref: str) -> tuple[str, bool]:
         "--end-of-options",
         commit_ref,
     )
+    if not commit_paths:
+        raise SystemExit("no commit changes to review")
     require_no_binary_diff(
         "commit diff",
         git(
@@ -9532,6 +9686,7 @@ def _validate_report(
     repo: Path,
     changed_paths: set[str],
     required: list[str],
+    reportable_lines: dict[str, set[int]] | None,
 ) -> None:
     allowed_top = {"findings", "overall_correctness", "overall_explanation", "overall_confidence"}
     extra_top = set(report) - allowed_top
@@ -9608,6 +9763,10 @@ def _validate_report(
         if rel not in changed_paths:
             ignored_findings.append((index, finding, rel, line))
             continue
+        if reportable_lines is not None and line not in reportable_lines.get(rel, set()):
+            raise SystemExit(
+                f"finding {index} location is not on a changed line: {rel}:{line}"
+            )
         kept_findings.append(finding)
         finding_text += "\n" + json.dumps(finding, sort_keys=True)
     if ignored_findings:
@@ -9644,9 +9803,16 @@ def validate_report(
     repo: Path,
     changed_paths: set[str],
     required: list[str],
+    reportable_lines: dict[str, set[int]] | None = None,
 ) -> None:
     try:
-        _validate_report(report, repo, changed_paths, required)
+        _validate_report(
+            report,
+            repo,
+            changed_paths,
+            required,
+            reportable_lines,
+        )
     except SystemExit as exc:
         if isinstance(exc.code, str):
             raise SystemExit(
@@ -10104,6 +10270,7 @@ def run_reviewer(
     changed_paths: set[str],
     required: list[str],
     input_truncated: bool = False,
+    reportable_lines: dict[str, set[int]] | None = None,
 ) -> dict[str, Any]:
     ensure_reviewer_input_complete(args, input_truncated)
     attempts = 3 if args.engine == "cursor" else 1
@@ -10111,7 +10278,13 @@ def run_reviewer(
         raw = run_engine(args, repo, prompt)
         try:
             report = extract_json(raw)
-            validate_report(report, repo, changed_paths, required)
+            validate_report(
+                report,
+                repo,
+                changed_paths,
+                required,
+                reportable_lines,
+            )
             return report
         except SystemExit as exc:
             if attempt >= attempts or not is_structured_output_failure(str(exc)):
@@ -10197,12 +10370,22 @@ def run_panel(
     changed_paths: set[str],
     input_truncated: bool,
     required: list[str] | None = None,
+    reportable_lines: dict[str, set[int]] | None = None,
 ) -> dict[str, Any]:
     reports: list[tuple[str, dict[str, Any]]] = []
     failures: list[str] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(reviewers)) as executor:
         future_by_label = {
-            executor.submit(run_reviewer, reviewer, repo, prompt, changed_paths, [], input_truncated): reviewer_label(reviewer)
+            executor.submit(
+                run_reviewer,
+                reviewer,
+                repo,
+                prompt,
+                changed_paths,
+                [],
+                input_truncated,
+                reportable_lines,
+            ): reviewer_label(reviewer)
             for reviewer in reviewers
         }
         for future in concurrent.futures.as_completed(future_by_label):
@@ -10235,6 +10418,7 @@ def run_panel(
         repo,
         changed_paths,
         args.require_finding if required is None else required,
+        reportable_lines,
     )
     return report
 
@@ -10767,6 +10951,7 @@ def main() -> int:
         datasets,
     )
     changed_paths = review_paths(repo, target, target_ref, args.commit)
+    reportable_lines = reportable_lines_from_bundle(bundle, changed_paths)
     print(f"bundle: {utf8_size(bundle)} bytes; review passes: {len(prompts)}")
     if review_input_snapshot(
         repo, target, target_ref, args.commit, require_refs=False
@@ -10796,6 +10981,7 @@ def main() -> int:
                     changed_paths,
                     required,
                     input_truncated,
+                    reportable_lines,
                 )
             else:
                 chunk_report = run_panel(
@@ -10806,13 +10992,20 @@ def main() -> int:
                     changed_paths,
                     input_truncated,
                     required,
+                    reportable_lines,
                 )
             chunk_reports.append((f"chunk {index}/{len(prompts)}", chunk_report))
         if len(chunk_reports) == 1:
             report = chunk_reports[0][1]
         else:
             report = merge_chunk_reports(chunk_reports)
-            validate_report(report, repo, changed_paths, args.require_finding)
+            validate_report(
+                report,
+                repo,
+                changed_paths,
+                args.require_finding,
+                reportable_lines,
+            )
         label = "autoreview panel" if len(reviewers) > 1 else "autoreview"
         if len(chunk_reports) > 1:
             label += " chunked"

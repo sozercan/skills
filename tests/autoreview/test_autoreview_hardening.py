@@ -1209,6 +1209,17 @@ class AutoreviewHardeningTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "does not accept merge commits"):
                 self.helper["commit_bundle"](repo, "HEAD")
 
+    def test_commit_bundle_rejects_empty_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            (repo / "base.txt").write_text("base\n", encoding="utf-8")
+            git(repo, "add", "base.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            git(repo, "commit", "-q", "--allow-empty", "-m", "empty")
+
+            with self.assertRaisesRegex(SystemExit, "no commit changes to review"):
+                self.helper["commit_bundle"](repo, "HEAD")
+
     def test_git_path_list_preserves_newline_filenames(self) -> None:
         if os.name == "nt":
             self.skipTest("Windows filesystems do not support newline path components")
@@ -6436,6 +6447,109 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 "invalid code_location keys",
             ):
                 self.helper["validate_report"](report, repo, {"src/index.ts"}, [])
+
+    def test_report_locations_must_overlap_changed_lines(self) -> None:
+        bundle = """# Branch Diff
+
+diff --git a/src/index.py b/src/index.py
+--- a/src/index.py
++++ b/src/index.py
+@@ -2,2 +2,3 @@
+-before
++after
+ context\f+fake
++added
+
+# Untracked Files
+
+# Untracked File
+path: "new.txt"
+source-line 1: "one"
+source-line 2: "two"
+
+# Dataset
+path: "src/index.py"
+source-line 999999: "not a review-bundle source line"
+"""
+        reportable = self.helper["reportable_lines_from_bundle"](bundle)
+        self.assertEqual(reportable["src/index.py"], {2, 4})
+        self.assertEqual(reportable["new.txt"], {1, 2})
+        report = {
+            "findings": [
+                {
+                    "title": "Finding",
+                    "body": "Body",
+                    "priority": "P1",
+                    "confidence": 0.9,
+                    "category": "bug",
+                    "code_location": {
+                        "file_path": "src/index.py",
+                        "line": 999999,
+                    },
+                }
+            ],
+            "overall_correctness": "patch is incorrect",
+            "overall_explanation": "Explanation",
+            "overall_confidence": 0.9,
+        }
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            with self.assertRaisesRegex(SystemExit, "not on a changed line"):
+                self.helper["validate_report"](
+                    report,
+                    repo,
+                    {"src/index.py"},
+                    [],
+                    reportable,
+                )
+            report["findings"][0]["code_location"]["line"] = 2
+            self.helper["validate_report"](
+                report,
+                repo,
+                {"src/index.py"},
+                [],
+                reportable,
+            )
+
+        metadata_bundle = """# Branch Diff
+
+diff --git a/old.py b/new.py
+similarity index 100%
+rename from old.py
+rename to new.py
+"""
+        metadata_lines = self.helper["reportable_lines_from_bundle"](
+            metadata_bundle
+        )
+        self.assertEqual(metadata_lines["old.py"], {1})
+        self.assertEqual(metadata_lines["new.py"], {1})
+
+        space_metadata = """# Branch Diff
+
+diff --git a/my file b/my file
+old mode 100644
+new mode 100755
+"""
+        self.assertEqual(
+            self.helper["reportable_lines_from_bundle"](
+                space_metadata,
+                {"my file"},
+            )["my file"],
+            {1},
+        )
+
+        empty_untracked = """# Untracked Files
+
+# Untracked File
+path: "empty.txt"
+"""
+        self.assertEqual(
+            self.helper["reportable_lines_from_bundle"](
+                empty_untracked,
+                {"empty.txt"},
+            )["empty.txt"],
+            {1},
+        )
 
     def test_print_report_escapes_terminal_controls(self) -> None:
         report = {
