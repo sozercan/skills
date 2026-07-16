@@ -1,6 +1,6 @@
 # Autoreview
 
-This directory vendors and minimally adapts the OpenClaw `autoreview` skill.
+This directory vendors the OpenClaw `autoreview` skill with downstream hardening and portability changes.
 
 ## Upstream
 
@@ -12,10 +12,18 @@ OpenClaw's work is used under the MIT License. The full notice is included below
 
 ## Local differences
 
+Compared with the upstream snapshot above:
+
 - Codex defaults to `gpt-5.6-sol` with `max` reasoning instead of upstream's `high` reasoning.
-- Non-runtime tests are kept in [`tests/autoreview`](../../tests/autoreview) so the installed skill payload contains only its documentation and runtime helpers.
-- JVM-specific hardening tests skip when the host exposes a Java launcher but no usable Java runtime.
-- Downstream hardening fixes cover review-input visibility, stable reviewed refs, unambiguous bundle serialization, and cross-platform UTF-8 handling.
+- Non-runtime tests live in [`tests/autoreview`](../../tests/autoreview) so the installed skill payload contains only its documentation and runtime helpers; JVM-specific hardening tests skip when a Java launcher exists but no usable runtime is available.
+- Native Windows CI and a PowerShell review-harness launcher are included.
+- Bootstrap requires Python 3.9+ and refuses Python, Git, GitHub CLI, reviewer, or PowerShell executables resolved from the reviewed checkout.
+- Git reads neutralize repository-controlled filters, replacement refs, hooks, signing, color, submodule ignore settings, diff formatting, and excludes.
+- Review-input hardening includes canonical `a/` and `b/` paths, broader secret aliases, escaped untracked paths, combined-diff handling, stable ref snapshots, unambiguous bundle serialization, empty-diff rejection, and cross-platform UTF-8 handling.
+- Pull-request bases resolve to commit object IDs rather than assuming an `origin/<branch>` remote-tracking ref.
+- Output paths are normalized and guarded against repository collisions and parent-directory replacement during atomic writes.
+- Panel deduplication preserves corroborating reviewer identities while retaining the strongest severity and confidence.
+- This README embeds the full MIT notice so standalone skill installations retain the upstream license.
 
 ## MIT License
 
