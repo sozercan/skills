@@ -3500,6 +3500,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_safe_git_reads_force_normal_diff_context(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
+            git(repo, "config", "core.autocrlf", "false")
             source = repo / "source.txt"
             source.write_text(
                 "one\ntwo\nthree\nfour\nfive\n",

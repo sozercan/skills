@@ -171,6 +171,23 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
         commit = next(command for command in commands if "commit" in command)
         self.assertIn("commit.gpgSign=false", commit)
 
+    def test_reviewer_args_rejects_unused_keyed_model_and_thinking(self) -> None:
+        for option, values in (
+            ("model", ["claude=claude-fable-5"]),
+            ("thinking", ["claude=high"]),
+        ):
+            with self.subTest(option=option), self.assertRaisesRegex(
+                SystemExit,
+                rf"--{option} specified for unselected reviewer: claude",
+            ):
+                overrides = {option: values}
+                AUTOREVIEW.reviewer_args(
+                    AUTOREVIEW.reviewer_test_args(
+                        engine="codex",
+                        **overrides,
+                    )
+                )
+
     def test_cursor_agent_bin_cli_alias(self) -> None:
         with mock.patch.object(
             sys,

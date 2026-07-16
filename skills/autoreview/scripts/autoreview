@@ -9578,6 +9578,16 @@ def reviewer_args(args: argparse.Namespace) -> list[argparse.Namespace]:
         reviewers = [(args.engine, None, None)]
 
     selected_engines = {engine for engine, _, _ in reviewers}
+    for option, configured in (
+        ("model", model_by_engine),
+        ("thinking", thinking_by_engine),
+    ):
+        unused_engines = set(configured) - selected_engines
+        if unused_engines:
+            engine_list = ", ".join(sorted(unused_engines))
+            raise SystemExit(
+                f"--{option} specified for unselected reviewer: {engine_list}"
+            )
     fallback_engines = set(fallback_by_engine) | set(env_fallback_by_engine)
     unused_fallback_engines = fallback_engines - selected_engines
     if unused_fallback_engines:
