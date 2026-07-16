@@ -3491,6 +3491,10 @@ class AutoreviewHardeningTests(unittest.TestCase):
             git(repo, "config", "filter.hostile.required", "true")
             source.write_text("changed\n", encoding="utf-8")
 
+            self.assertEqual(
+                self.helper["choose_target"](repo, "auto", None),
+                ("local", None),
+            )
             bundle, truncated = self.helper["local_bundle"](repo)
 
             self.assertIn("+changed", bundle)

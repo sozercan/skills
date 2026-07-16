@@ -1719,6 +1719,20 @@ def git_filter_config_args(repo: Path) -> list[str]:
     return config
 
 
+def git_subcommand(args: tuple[str, ...]) -> str | None:
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument == "-c":
+            index += 2
+            continue
+        if argument.startswith("-c") and argument != "-c":
+            index += 1
+            continue
+        return argument
+    return None
+
+
 def git_result(
     repo: Path,
     *args: str,
@@ -1727,7 +1741,7 @@ def git_result(
     try:
         filter_config = (
             git_filter_config_args(repo)
-            if args and args[0] in {"diff", "status"}
+            if git_subcommand(args) in {"diff", "status"}
             else []
         )
         return run(
