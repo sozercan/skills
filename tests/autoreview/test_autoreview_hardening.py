@@ -599,6 +599,24 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertIn("\u2028diff --git a/fake b/fake", units[1])
         self.assertEqual("".join(units), bundle)
 
+    def test_diff_suppress_blank_empty_is_forced_off(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            source = repo / "source.txt"
+            source.write_text("before\n\nafter\n", encoding="utf-8")
+            git(repo, "add", "source.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            git(repo, "config", "diff.suppressBlankEmpty", "true")
+            source.write_text("changed\n\nafter\n", encoding="utf-8")
+
+            bundle, truncated = self.helper["local_bundle"](repo)
+            patch = bundle.split("# Unstaged Diff\n", 1)[1]
+            chunks = self.helper["split_oversized_review_unit"](patch, 120)
+
+            self.assertIn(" \n", patch)
+            self.assertTrue(all("\x1b" not in chunk.content for chunk in chunks))
+            self.assertFalse(truncated)
+
     def test_combined_diff_headers_preserve_chunk_context(self) -> None:
         unit = (
             "diff --cc settings.json\n"
@@ -3936,8 +3954,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
             self.assertEqual(args.json_output, str((home / "review.json").resolve()))
             self.assertEqual(args.output, str((home / "review.txt").resolve()))
-            self.helper["atomic_write_text"](Path(args.json_output), "{}\n")
-            self.helper["atomic_write_text"](Path(args.output), "review\n")
+            self.helper["atomic_write_text"](Path(args.json_output), "{}\n", repo=repo)
+            self.helper["atomic_write_text"](Path(args.output), "review\n", repo=repo)
             self.assertEqual(
                 (home / "review.json").read_text(encoding="utf-8"),
                 "{}\n",
@@ -3961,6 +3979,30 @@ class AutoreviewHardeningTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "must point to different files"):
                 self.helper["reject_repo_output_paths"](args, repo)
 
+    @unittest.skipIf(os.name == "nt", "POSIX output parent swap behavior")
+    def test_atomic_output_rejects_parent_symlink_swap_into_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            output_parent = root / "output"
+            output_parent.mkdir()
+            output = output_parent / "review.txt"
+            expected = self.helper["output_parent_state"](output, repo)
+            output_parent.rmdir()
+            output_parent.symlink_to(repo, target_is_directory=True)
+
+            with mock.patch.dict(
+                self.helper["atomic_write_text"].__globals__,
+                {"output_parent_state": mock.Mock(return_value=expected)},
+            ), self.assertRaisesRegex(SystemExit, "changed or became unsafe"):
+                self.helper["atomic_write_text"](
+                    output,
+                    "review\n",
+                    repo=repo,
+                )
+
+            self.assertFalse((repo / "review.txt").exists())
+
     def test_atomic_output_replaces_hard_link_without_touching_repo_file(
         self,
     ) -> None:
@@ -3972,7 +4014,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
             outside = root / "review.txt"
             os.link(tracked, outside)
 
-            self.helper["atomic_write_text"](outside, "review\n")
+            self.helper["atomic_write_text"](outside, "review\n", repo=repo)
 
             self.assertEqual(
                 tracked.read_text(encoding="utf-8"),
@@ -4110,6 +4152,18 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 before,
             )
 
+    def test_repo_root_rejects_core_worktree_redirect(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            redirected = root / "redirected"
+            redirected.mkdir()
+            git(repo, "config", "core.worktree", str(redirected))
+
+            with mock.patch.object(Path, "cwd", return_value=repo):
+                with self.assertRaisesRegex(SystemExit, "core.worktree redirect"):
+                    self.helper["repo_root"]()
+
     def test_cli_dry_run_rejects_secret_like_branch_and_ref_before_printing(
         self,
     ) -> None:
@@ -4123,23 +4177,36 @@ class AutoreviewHardeningTests(unittest.TestCase):
             secret_branch = "feature-" + secret
             git(repo, "branch", "-M", secret_branch)
 
+            fake_bin = Path(tempdir) / "bin"
+            fake_bin.mkdir()
+            gh_marker = Path(tempdir) / "gh-invoked"
+            fake_gh = fake_bin / ("gh.cmd" if os.name == "nt" else "gh")
+            if os.name == "nt":
+                fake_gh.write_text(
+                    "@echo off\r\necho invoked>" + str(gh_marker) + "\r\nexit /b 1\r\n",
+                    encoding="utf-8",
+                )
+            else:
+                fake_gh.write_text(
+                    "#!/bin/sh\nprintf invoked > '"
+                    + str(gh_marker).replace("'", "'\"'\"'")
+                    + "'\nexit 1\n",
+                    encoding="utf-8",
+                )
+                fake_gh.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
             branch_result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "branch",
-                    "--base",
-                    "HEAD",
-                    "--dry-run",
-                ],
+                [sys.executable, str(SCRIPT), "--mode", "auto", "--dry-run"],
                 cwd=repo,
+                env=env,
                 text=True,
                 capture_output=True,
                 check=False,
             )
 
             self.assertNotEqual(branch_result.returncode, 0)
+            self.assertFalse(gh_marker.exists())
             self.assertIn("clean or redact current branch", branch_result.stderr)
             self.assertNotIn(secret, branch_result.stdout)
             self.assertNotIn(secret, branch_result.stderr)

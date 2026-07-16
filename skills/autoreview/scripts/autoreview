@@ -15,6 +15,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -51,6 +52,8 @@ SAFE_GIT_CONFIG_ARGS = (
     "-c",
     "diff.renames=false",
     "-c",
+    "diff.suppressBlankEmpty=false",
+    "-c",
     "pager.diff=cat",
     "-c",
     "pager.log=cat",
@@ -75,6 +78,7 @@ ENGINE_GIT_CONFIG_OVERRIDES = (
     ("log.showSignature", "false"),
     ("diff.external", ""),
     ("diff.renames", "false"),
+    ("diff.suppressBlankEmpty", "false"),
     ("pager.diff", "cat"),
     ("pager.log", "cat"),
     ("pager.show", "cat"),
@@ -1700,7 +1704,20 @@ def repo_root() -> Path:
         raise SystemExit("repository root is not valid UTF-8") from exc
     if result.returncode != 0:
         raise SystemExit("autoreview must run inside a git repository")
-    return Path(result.stdout.strip()).resolve()
+    reported_root = Path(result.stdout.strip()).resolve()
+    expected_root = unsafe_root.resolve()
+    same_root = reported_root == expected_root
+    if not same_root:
+        try:
+            same_root = os.path.samefile(reported_root, expected_root)
+        except OSError:
+            pass
+    if not same_root:
+        raise SystemExit(
+            "refusing repository-local core.worktree redirect because Git's "
+            "reported root differs from the discovered checkout root"
+        )
+    return expected_root
 
 
 def discover_repo_root(start: Path) -> Path | None:
@@ -1809,9 +1826,14 @@ def is_dirty(repo: Path) -> bool:
     )
 
 
-def choose_target(repo: Path, mode: str, base_ref: str | None) -> tuple[str, str | None]:
+def choose_target(
+    repo: Path,
+    mode: str,
+    base_ref: str | None,
+    branch: str | None = None,
+) -> tuple[str, str | None]:
     mode = "local" if mode == "uncommitted" else mode
-    branch = current_branch(repo)
+    branch = branch or current_branch(repo)
     if mode == "local" or (mode == "auto" and is_dirty(repo)):
         return "local", None
     if mode == "commit":
@@ -9956,19 +9978,122 @@ def reject_repo_output_paths(args: argparse.Namespace, repo: Path) -> None:
             )
 
 
-def atomic_write_text(path: Path, content: str) -> None:
+def output_parent_state(path: Path, repo: Path) -> tuple[int, int]:
     parent = path.parent
-    descriptor, temporary = tempfile.mkstemp(
-        dir=parent,
-        prefix=f".{path.name}.",
-    )
-    temporary_path = Path(temporary)
     try:
+        before = os.stat(parent, follow_symlinks=False)
+        resolved = parent.resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit(
+            f"output parent is unavailable: {display_escape(parent, 500)}: "
+            f"{display_escape(exc, 500)}"
+        ) from exc
+    if not stat.S_ISDIR(before.st_mode):
+        raise SystemExit(
+            f"output parent must be a real directory: {display_escape(parent, 500)}"
+        )
+    repo_root = repo.resolve()
+    if is_within(resolved, repo_root):
+        raise SystemExit("output parent must remain outside the reviewed repository")
+    return before.st_dev, before.st_ino
+
+
+def atomic_write_text(
+    path: Path,
+    content: str,
+    *,
+    repo: Path | None = None,
+) -> None:
+    if repo is None:
+        parent = path.parent
+        descriptor, temporary = tempfile.mkstemp(
+            dir=parent,
+            prefix=f".{path.name}.",
+        )
+        temporary_path = Path(temporary)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(content)
+            os.replace(temporary_path, path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return
+
+    expected_parent = output_parent_state(path, repo)
+    parent = path.parent
+    supports_secure_dir_fd = (
+        os.open in os.supports_dir_fd
+        and os.rename in os.supports_dir_fd
+        and os.unlink in os.supports_dir_fd
+        and bool(getattr(os, "O_DIRECTORY", 0))
+        and bool(getattr(os, "O_NOFOLLOW", 0))
+    )
+    if not supports_secure_dir_fd:
+        # Windows does not expose POSIX dir_fd operations. Revalidate immediately
+        # before and after temporary creation; directory replacement is normally
+        # denied while the temporary file is open.
+        descriptor, temporary = tempfile.mkstemp(
+            dir=parent,
+            prefix=f".{path.name}.",
+        )
+        temporary_path = Path(temporary)
+        try:
+            if output_parent_state(path, repo) != expected_parent:
+                raise SystemExit("output parent changed after validation")
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(content)
+            if output_parent_state(path, repo) != expected_parent:
+                raise SystemExit("output parent changed while writing")
+            os.replace(temporary_path, path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | os.O_DIRECTORY
+        | os.O_NOFOLLOW
+    )
+    try:
+        parent_fd = os.open(parent, flags)
+    except OSError as exc:
+        raise SystemExit(
+            f"output parent changed or became unsafe: {display_escape(parent, 500)}"
+        ) from exc
+    temporary_name = f".{path.name}.{secrets.token_hex(8)}"
+    descriptor: int | None = None
+    try:
+        opened = os.fstat(parent_fd)
+        if (opened.st_dev, opened.st_ino) != expected_parent:
+            raise SystemExit("output parent changed after validation")
+        descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent_fd,
+        )
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = None
             handle.write(content)
-        os.replace(temporary_path, path)
+        os.rename(
+            temporary_name,
+            path.name,
+            src_dir_fd=parent_fd,
+            dst_dir_fd=parent_fd,
+        )
     finally:
-        temporary_path.unlink(missing_ok=True)
+        if descriptor is not None:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary_name, dir_fd=parent_fd)
+        except FileNotFoundError:
+            pass
+        os.close(parent_fd)
 
 
 def main() -> int:
@@ -10004,10 +10129,12 @@ def main() -> int:
     reviewers = reviewer_args(args)
     repo = repo_root()
     reject_repo_output_paths(args, repo)
-    target, target_ref = choose_target(repo, args.mode, args.base)
     branch = current_branch(repo)
-    display_ref = args.commit if target == "commit" else target_ref
     require_no_secret_values("current branch", branch)
+    target, target_ref = choose_target(
+        repo, args.mode, args.base, branch=branch
+    )
+    display_ref = args.commit if target == "commit" else target_ref
     if display_ref:
         require_no_secret_values("review target ref", display_ref)
     print(f"autoreview target: {target}")
@@ -10123,10 +10250,12 @@ def main() -> int:
         )
         return 1
 
+    reject_repo_output_paths(args, repo)
     if args.json_output:
         atomic_write_text(
             Path(args.json_output),
             json.dumps(report, indent=2) + "\n",
+            repo=repo,
         )
 
     if args.output:
@@ -10139,7 +10268,7 @@ def main() -> int:
             sys.stdout = original_stdout
         output = rendered.getvalue()
         print(output, end="")
-        atomic_write_text(Path(args.output), output)
+        atomic_write_text(Path(args.output), output, repo=repo)
     else:
         print_report(report, label=label)
 
