@@ -6269,24 +6269,35 @@ def review_input_snapshot(
     commit_ref: str,
     *,
     require_refs: bool = True,
-) -> tuple[object, str | None]:
-    reviewed_ref: str | None = None
+) -> object:
+    if target == "local":
+        return ("local", source_tree_snapshot(repo))
     if target == "branch":
         assert target_ref is not None
-        reviewed_ref = resolve_git_ref(
-            repo,
-            target_ref,
-            "base",
-            required=require_refs,
+        return (
+            "branch",
+            resolve_git_ref(
+                repo,
+                target_ref,
+                "base",
+                required=require_refs,
+            ),
+            resolve_git_ref(
+                repo,
+                "HEAD",
+                "branch HEAD",
+                required=require_refs,
+            ),
         )
-    elif target == "commit":
-        reviewed_ref = resolve_git_ref(
+    return (
+        "commit",
+        resolve_git_ref(
             repo,
             commit_ref,
             "commit",
             required=require_refs,
-        )
-    return source_tree_snapshot(repo), reviewed_ref
+        ),
+    )
 
 
 def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
@@ -6309,6 +6320,8 @@ def branch_bundle(repo: Path, base_ref: str) -> tuple[str, bool]:
         "--end-of-options",
         diff_range,
     )
+    if not branch_paths and not branch_patch.strip():
+        raise SystemExit("no branch changes to review")
     require_no_binary_diff(
         "branch diff",
         git(
@@ -9207,6 +9220,10 @@ def _validate_report(
         normalized_rel = raw_rel if raw_rel in changed_paths else raw_rel.replace("\\", "/")
         while normalized_rel.startswith("./"):
             normalized_rel = normalized_rel[2:]
+        if normalized_rel not in changed_paths and normalized_rel.startswith(("a/", "b/")):
+            diff_rel = normalized_rel[2:]
+            if diff_rel in changed_paths:
+                normalized_rel = diff_rel
         rel_path = PurePosixPath(normalized_rel)
         rel = rel_path.as_posix()
         line = location.get("line")

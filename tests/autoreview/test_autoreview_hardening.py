@@ -564,6 +564,16 @@ class AutoreviewHardeningTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "unknown base ref"):
                 self.helper["branch_bundle"](repo, "origin/main")
 
+    def test_branch_bundle_rejects_empty_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+
+            with self.assertRaisesRegex(SystemExit, "no branch changes to review"):
+                self.helper["branch_bundle"](repo, "HEAD")
+
     def test_commit_bundle_rejects_merge_commits(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
@@ -4035,6 +4045,54 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 commit_snapshot,
             )
 
+    def test_committed_target_snapshots_ignore_unrelated_worktree_changes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            tracked = repo / "tracked.txt"
+            tracked.write_text("base\n", encoding="utf-8")
+            git(repo, "add", "tracked.txt")
+            git(repo, "commit", "-q", "-m", "base")
+            base = git(repo, "rev-parse", "HEAD").strip()
+            tracked.write_text("head\n", encoding="utf-8")
+            git(repo, "commit", "-qam", "head")
+
+            branch_snapshot = self.helper["review_input_snapshot"](
+                repo,
+                "branch",
+                base,
+                "HEAD",
+            )
+            commit_snapshot = self.helper["review_input_snapshot"](
+                repo,
+                "commit",
+                None,
+                "HEAD",
+            )
+            generated = repo / "generated.log"
+            generated.write_text("one\n", encoding="utf-8")
+            generated.write_text("two\n", encoding="utf-8")
+
+            self.assertEqual(
+                self.helper["review_input_snapshot"](
+                    repo,
+                    "branch",
+                    base,
+                    "HEAD",
+                ),
+                branch_snapshot,
+            )
+            self.assertEqual(
+                self.helper["review_input_snapshot"](
+                    repo,
+                    "commit",
+                    None,
+                    "HEAD",
+                ),
+                commit_snapshot,
+            )
+
     def test_source_tree_snapshot_detects_parallel_test_mutations(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
@@ -5586,6 +5644,19 @@ class AutoreviewHardeningTests(unittest.TestCase):
             self.helper["validate_report"](report, repo, {"src/index.ts"}, [])
 
             self.assertEqual(report["findings"][0]["code_location"]["file_path"], "src/index.ts")
+
+            for prefixed in ("a/src/index.ts", "b/src/index.ts"):
+                report["findings"][0]["code_location"]["file_path"] = prefixed
+                self.helper["validate_report"](
+                    report,
+                    repo,
+                    {"src/index.ts"},
+                    [],
+                )
+                self.assertEqual(
+                    report["findings"][0]["code_location"]["file_path"],
+                    "src/index.ts",
+                )
 
             report["findings"][0]["code_location"]["file_path"] = r"src\index.ts"
             self.helper["validate_report"](report, repo, {r"src\index.ts"}, [])
