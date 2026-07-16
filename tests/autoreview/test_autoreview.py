@@ -169,7 +169,14 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             namespace["create_fixture_repo"](Path(tempdir), "benign")
 
         commit = next(command for command in commands if "commit" in command)
+        hooks_config = next(
+            command
+            for command in commands
+            if "core.hooksPath" in command
+        )
         self.assertIn("commit.gpgSign=false", commit)
+        self.assertEqual(hooks_config[:3], ["git", "config", "core.hooksPath"])
+        self.assertTrue(hooks_config[3].endswith(".empty-hooks"))
 
     def test_reviewer_args_rejects_unused_keyed_model_and_thinking(self) -> None:
         for option, values in (
