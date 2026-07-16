@@ -126,6 +126,70 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def discover_checkout_root(start: Path) -> Path | None:
+    current = start.resolve()
+    while True:
+        if (current / ".git").exists():
+            return current
+        if current.parent == current:
+            return None
+        current = current.parent
+
+
+def is_within(path: Path, root: Path) -> bool:
+    return path == root or path.is_relative_to(root)
+
+
+def resolve_external_command(name: str, roots: list[Path]) -> str:
+    rejected_roots = [root.resolve() for root in roots]
+    path_entries = [
+        Path(entry)
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry and Path(entry).is_absolute()
+    ]
+    extensions = [""]
+    if os.name == "nt" and not Path(name).suffix:
+        extensions = [
+            extension.lower()
+            for extension in os.environ.get(
+                "PATHEXT",
+                ".COM;.EXE;.BAT;.CMD",
+            ).split(";")
+            if extension
+        ]
+    for directory in path_entries:
+        try:
+            lexical_directory = Path(os.path.abspath(directory))
+            resolved_directory = directory.resolve(strict=True)
+        except OSError:
+            continue
+        if any(
+            is_within(candidate, root)
+            for candidate in (lexical_directory, resolved_directory)
+            for root in rejected_roots
+        ):
+            continue
+        for extension in extensions:
+            candidate = directory / f"{name}{extension}"
+            try:
+                lexical = Path(os.path.abspath(candidate))
+                resolved = candidate.resolve(strict=True)
+            except OSError:
+                continue
+            if not resolved.is_file() or (os.name != "nt" and not os.access(resolved, os.X_OK)):
+                continue
+            if any(
+                is_within(value, root)
+                for value in (lexical, resolved)
+                for root in rejected_roots
+            ):
+                continue
+            return str(lexical)
+    raise RuntimeError(
+        f"trusted {name} executable not found outside reviewed checkout"
+    )
+
+
 def write_fixture_file(repo: Path, content: str) -> None:
     with (repo / "app.js").open("w", encoding="utf-8", newline="\n") as handle:
         handle.write(content)
@@ -135,19 +199,19 @@ def run(command: list[str], cwd: Path) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
-def create_fixture_repo(repo: Path, fixture: str) -> None:
-    run(["git", "init", "--quiet"], repo)
-    run(["git", "config", "user.name", "Review Fixture"], repo)
-    run(["git", "config", "user.email", "review-fixture@example.com"], repo)
+def create_fixture_repo(repo: Path, fixture: str, git_bin: str) -> None:
+    run([git_bin, "init", "--quiet"], repo)
+    run([git_bin, "config", "user.name", "Review Fixture"], repo)
+    run([git_bin, "config", "user.email", "review-fixture@example.com"], repo)
     empty_hooks = repo / ".empty-hooks"
     empty_hooks.mkdir()
-    run(["git", "config", "core.hooksPath", str(empty_hooks)], repo)
+    run([git_bin, "config", "core.hooksPath", str(empty_hooks)], repo)
 
     write_fixture_file(repo, MALICIOUS_INITIAL if fixture == "malicious" else BENIGN_INITIAL)
-    run(["git", "add", "app.js"], repo)
+    run([git_bin, "add", "app.js"], repo)
     run(
         [
-            "git",
+            git_bin,
             "-c",
             "commit.gpgSign=false",
             "commit",
@@ -213,10 +277,19 @@ def cleanup_repo(repo: Path) -> None:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     script_dir = Path(__file__).resolve().parent
+    checkout_roots = [
+        root
+        for root in (
+            discover_checkout_root(Path.cwd()),
+            discover_checkout_root(script_dir),
+        )
+        if root is not None
+    ]
+    git_bin = resolve_external_command("git", checkout_roots)
     engines = args.engines or list(DEFAULT_ENGINES)
     repo = Path(tempfile.mkdtemp(prefix="autoreview-fixture."))
     try:
-        create_fixture_repo(repo, args.fixture)
+        create_fixture_repo(repo, args.fixture, git_bin)
         run_reviews(repo, script_dir, args.fixture, engines)
     except subprocess.CalledProcessError as exc:
         return int(exc.returncode or 1)

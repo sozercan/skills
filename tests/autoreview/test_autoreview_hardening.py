@@ -83,6 +83,94 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.helper = load_helper()
 
+    @unittest.skipIf(os.name == "nt", "POSIX bootstrap behavior")
+    def test_autoreview_bootstrap_ignores_repo_local_python(self) -> None:
+        trusted_python = Path(sys.executable).resolve()
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            fake_bin = repo / "bin"
+            fake_bin.mkdir()
+            marker = repo / "python-invoked"
+            fake_python = fake_bin / "python3"
+            fake_python.write_text(
+                "#!/bin/sh\nprintf invoked > '"
+                + str(marker).replace("'", "'\"'\"'")
+                + "'\nexit 99\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = (
+                str(fake_bin)
+                + os.pathsep
+                + str(trusted_python.parent)
+                + os.pathsep
+                + "/usr/bin:/bin"
+            )
+
+            result = subprocess.run(
+                [str(SCRIPT), "--help"],
+                cwd=repo,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("usage: autoreview", result.stdout)
+            self.assertFalse(marker.exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX shell wrapper behavior")
+    def test_shell_harness_ignores_repo_local_python(self) -> None:
+        trusted_python = Path(sys.executable).resolve()
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = root / "repo"
+            repo.mkdir()
+            (repo / ".git").mkdir()
+            scripts = repo / "scripts"
+            scripts.mkdir()
+            wrapper = scripts / "test-review-harness"
+            harness = scripts / "test-review-harness.py"
+            shutil.copy2(SCRIPT.with_name("test-review-harness"), wrapper)
+            harness.write_text(
+                "print('trusted harness')\n",
+                encoding="utf-8",
+            )
+            fake_bin = repo / "bin"
+            fake_bin.mkdir()
+            marker = repo / "python-invoked"
+            fake_python = fake_bin / "python3"
+            fake_python.write_text(
+                "#!/bin/sh\nprintf invoked > '"
+                + str(marker).replace("'", "'\"'\"'")
+                + "'\nexit 99\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = (
+                str(fake_bin)
+                + os.pathsep
+                + str(trusted_python.parent)
+                + os.pathsep
+                + "/usr/bin:/bin"
+            )
+
+            result = subprocess.run(
+                ["/bin/sh", str(wrapper)],
+                cwd=repo,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("trusted harness", result.stdout)
+            self.assertFalse(marker.exists())
+
     @unittest.skipIf(os.name == "nt", "POSIX shell wrapper behavior")
     def test_shell_harness_rejects_python_older_than_3_9(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -113,7 +201,7 @@ class AutoreviewHardeningTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 127, result.stderr)
-            self.assertIn("Python 3.9 or newer is required", result.stderr)
+            self.assertIn("Python 3.9 or newer outside the reviewed checkout is required", result.stderr)
 
     def test_init_repo_isolates_signing_and_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -134,6 +222,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertIn("[Console]::Error.WriteLine", harness)
         self.assertNotIn("Write-Error", harness)
         self.assertIn("sys.version_info < (3, 9)", harness)
+        self.assertIn("-CommandType Application", harness)
+        self.assertIn("Test-ExternalApplication", harness)
         self.assertIn("$LASTEXITCODE -eq 0", harness)
         self.assertIn("exit 127", harness)
         for disabled_engine in ("droid", "copilot", "opencode", "cursor"):

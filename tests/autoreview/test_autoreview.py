@@ -7,6 +7,7 @@ import io
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -167,8 +168,9 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             namespace["create_fixture_repo"].__globals__,
             {"run": record},
         ):
-            namespace["create_fixture_repo"](Path(tempdir), "benign")
+            namespace["create_fixture_repo"](Path(tempdir), "benign", "/trusted/git")
 
+        self.assertTrue(all(command[0] == "/trusted/git" for command in commands))
         commit = next(command for command in commands if "commit" in command)
         hooks_config = next(
             command
@@ -176,7 +178,7 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             if "core.hooksPath" in command
         )
         self.assertIn("commit.gpgSign=false", commit)
-        self.assertEqual(hooks_config[:3], ["git", "config", "core.hooksPath"])
+        self.assertEqual(hooks_config[:3], ["/trusted/git", "config", "core.hooksPath"])
         self.assertTrue(hooks_config[3].endswith(".empty-hooks"))
 
     def test_reviewer_args_rejects_unused_keyed_model_and_thinking(self) -> None:
@@ -195,6 +197,43 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
                         **overrides,
                     )
                 )
+
+    def test_harness_resolves_git_outside_reviewed_checkout(self) -> None:
+        harness_path = SCRIPT_PATH.with_name("test-review-harness.py")
+        namespace = runpy.run_path(str(harness_path))
+        trusted_git = shutil.which("git")
+        if trusted_git is None:
+            self.skipTest("git is not installed")
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = Path(tempdir) / "repo"
+            fake_bin = repo / "bin"
+            fake_bin.mkdir(parents=True)
+            fake_name = "git.cmd" if os.name == "nt" else "git"
+            fake_git = fake_bin / fake_name
+            fake_git.write_text(
+                "@exit /b 99\r\n"
+                if os.name == "nt"
+                else "#!/bin/sh\nexit 99\n",
+                encoding="utf-8",
+            )
+            if os.name != "nt":
+                fake_git.chmod(0o755)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "PATH": str(fake_bin)
+                    + os.pathsep
+                    + str(Path(trusted_git).parent),
+                },
+            ):
+                resolved = namespace["resolve_external_command"](
+                    "git",
+                    [repo],
+                )
+
+            self.assertFalse(
+                Path(resolved).resolve().is_relative_to(repo.resolve())
+            )
 
     def test_cursor_agent_bin_cli_alias(self) -> None:
         with mock.patch.object(
