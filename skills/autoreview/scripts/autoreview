@@ -10339,13 +10339,23 @@ def merge_panel_reports(reports: list[tuple[str, dict[str, Any]]]) -> dict[str, 
             f"Reviewers: {labels}\n\n" + "\n\n".join(body_sections),
             2000,
         )
-    incorrect = bool(findings) or any(report["overall_correctness"] == "patch is incorrect" for _, report in reports)
+    def supports_incorrect(report: dict[str, Any]) -> bool:
+        return bool(report["findings"]) or report["overall_correctness"] == "patch is incorrect"
+
+    incorrect = bool(findings) or any(
+        supports_incorrect(report) for _, report in reports
+    )
+    supporting_confidences = [
+        report["overall_confidence"]
+        for _, report in reports
+        if supports_incorrect(report) == incorrect
+    ]
     summary = ", ".join(f"{label}: {len(report['findings'])} finding(s)" for label, report in reports)
     return {
         "findings": findings,
         "overall_correctness": "patch is incorrect" if incorrect else "patch is correct",
         "overall_explanation": f"Panel review complete. {summary}.",
-        "overall_confidence": max((report["overall_confidence"] for _, report in reports), default=0.5),
+        "overall_confidence": max(supporting_confidences, default=0.5),
     }
 
 

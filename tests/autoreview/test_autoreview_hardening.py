@@ -4937,6 +4937,27 @@ class AutoreviewHardeningTests(unittest.TestCase):
         self.assertIn("Claude detail", finding["body"])
         self.assertIn("Codex detail", finding["body"])
 
+    def test_panel_confidence_comes_from_reports_supporting_the_verdict(self) -> None:
+        incorrect = {
+            "findings": [],
+            "overall_correctness": "patch is incorrect",
+            "overall_explanation": "issue",
+            "overall_confidence": 0.2,
+        }
+        clean = {
+            "findings": [],
+            "overall_correctness": "patch is correct",
+            "overall_explanation": "clean",
+            "overall_confidence": 0.99,
+        }
+
+        merged = self.helper["merge_panel_reports"](
+            [("codex", incorrect), ("claude", clean)]
+        )
+
+        self.assertEqual(merged["overall_correctness"], "patch is incorrect")
+        self.assertEqual(merged["overall_confidence"], 0.2)
+
     def test_partial_panel_failure_output_is_terminal_escaped(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo = init_repo(Path(tempdir))
