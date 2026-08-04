@@ -7,7 +7,7 @@ description: "Pre-commit/ship code review: Codex default; optional Claude, Pi, o
 
 Run the bundled structured review helper as a closeout check. This is code review, not Guardian `auto_review` approval routing.
 
-Codex review is the default when no engine is set. It uses `gpt-5.6-sol` with `max` reasoning by default, then retries once with `gpt-5.6-terra` only when the account cannot access Sol. Claude review is optional and uses `claude-fable-5` by default. Pi and Kimi use the model configured by their respective CLIs unless `--model` overrides it.
+Codex review is the default when no engine is set. It uses `gpt-5.6-sol` with `max` reasoning by default, then retries once with `gpt-5.6-terra` only when the account cannot access Sol. Claude review is optional and uses `claude-opus-5` with `max` reasoning by default. Pi and Kimi use the model configured by their respective CLIs unless `--model` overrides it.
 
 For user-visible behavior, pair autoreview with `behavior-validator`. Autoreview is source-aware and judges the change bundle; behavior validation is source-blind and judges the running product or tool against a behavior contract. A clean autoreview is not proof that a UI, CLI, API, or generated artifact works from the user's perspective.
 
@@ -272,13 +272,13 @@ Run multiple reviewers against one frozen bundle:
 Set reviewer models and thinking/effort explicitly:
 
 ```bash
-"$AUTOREVIEW" --reviewers codex,claude --model codex=gpt-5.6-sol --thinking codex=high --model claude=claude-fable-5 --thinking claude=max
+"$AUTOREVIEW" --reviewers codex,claude --model codex=gpt-5.6-sol --thinking codex=high --model claude=claude-opus-5 --thinking claude=max
 ```
 
 Inline syntax is also supported for simple model IDs:
 
 ```bash
-"$AUTOREVIEW" --reviewers codex:gpt-5.6-sol:high,claude:claude-fable-5:max
+"$AUTOREVIEW" --reviewers codex:gpt-5.6-sol:high,claude:claude-opus-5:max
 ```
 
 For models with slashes or extra colons, prefer keyed form:
@@ -299,14 +299,14 @@ Recommended model defaults:
 | Engine              | Default model                                      | Source note                                           |
 | ------------------- | -------------------------------------------------- | ----------------------------------------------------- |
 | **codex** (default) | `gpt-5.6-sol` -> `gpt-5.6-terra` on access failure | OpenClaw org review default                           |
-| **claude**          | `claude-fable-5`                                   | Anthropic's most capable widely released Claude model |
+| **claude**          | `claude-opus-5`                                    | Anthropic's complex agentic coding and enterprise model |
 
 CLI flags and environment variables override these defaults. Pi and Kimi do not get built-in model defaults because their configured model catalogs may vary by installation. Droid, Copilot, Cursor, and OpenCode are currently refused.
 
 | Engine              | Model flag                 | Example model IDs                                                            | Thinking flag                 | Accepted levels                                            |
 | ------------------- | -------------------------- | ---------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------- |
 | **codex** (default) | `codex --model X exec ...` | `gpt-5.6-sol`, then `gpt-5.6-terra` on Sol access failure                    | `-c model_reasoning_effort=Y` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| **claude**          | `claude --model X`         | `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5` | `--effort Y`                  | `low`, `medium`, `high`, `xhigh`, `max`                    |
+| **claude**          | `claude --model X`         | `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-5`      | `--effort Y`                  | `low`, `medium`, `high`, `xhigh`, `max`                    |
 | **droid**           | currently refused          | Factory model IDs                                                            | `-r, --reasoning-effort Y`    | `off`, `none`, `low`, `medium`, `high`, `xhigh`, `max`     |
 | **copilot**         | currently refused          | Copilot model aliases                                                        | not supported                 | n/a                                                        |
 | **pi**              | `pi --model X`             | `anthropic/claude-sonnet-4`, `openai/gpt-4o`                                 | `--thinking Y`                | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`         |
@@ -316,13 +316,13 @@ CLI flags and environment variables override these defaults. Pi and Kimi do not 
 
 Claude also supports `--fallback-model a,b` for availability-based fallback chains ([model-config](https://code.claude.com/docs/en/model-config)). Current Claude docs note that auth, billing, rate-limit, request-size, and transport errors do not trigger fallback, and the changelog documents interactive-session support in `v2.1.166`.
 
-[OpenAI's model guidance](https://developers.openai.com/api/docs/guides/latest-model) identifies Sol as the GPT-5.6 frontier-capability route and documents `max` support. Autoreview keeps `high` as its default; use `max` only for the hardest quality-first reviews after comparing its latency and cost with `xhigh` on representative changes.
+[OpenAI's model guidance](https://developers.openai.com/api/docs/guides/latest-model) identifies Sol as the GPT-5.6 frontier-capability route and documents `max` support. Autoreview defaults Codex to `max` for quality-first reviews; lower it explicitly when latency or cost matters more than absolute capability.
 
 Examples matching current `main` behavior:
 
 ```bash
 # Codex with explicit model and reasoning
-"$AUTOREVIEW" --engine codex --model gpt-5.6-sol --thinking high
+"$AUTOREVIEW" --engine codex --model gpt-5.6-sol --thinking max
 
 # Codex fast mode (priority service tier); needs a model whose catalog lists the tier, silently standard otherwise
 "$AUTOREVIEW" --engine codex --codex-speed fast
@@ -331,8 +331,8 @@ Examples matching current `main` behavior:
 "$AUTOREVIEW" --engine codex --codex-config 'service_tier="fast"'
 
 # Claude Code aliases or full model names, with optional availability fallback
-"$AUTOREVIEW" --engine claude --model claude-fable-5 --thinking max
-"$AUTOREVIEW" --engine claude --model claude-fable-5 --fallback-model claude-opus-4-8,claude-sonnet-4-6
+"$AUTOREVIEW" --engine claude --model claude-opus-5 --thinking max
+"$AUTOREVIEW" --engine claude --model claude-opus-5 --fallback-model claude-fable-5,claude-opus-4-8
 
 # Pi with explicit model and thinking level
 "$AUTOREVIEW" --engine pi --model anthropic/claude-sonnet-4 --thinking high --pi-bin pi
@@ -433,7 +433,7 @@ The helper:
 - supports `--dry-run`, `--parallel-tests`, `--parallel-tests-shell`, `--prompt`, repo-relative `--prompt-file`, repo-relative `--dataset`, `--no-tools`, `--no-web-search`, repeatable Codex-only safe model/response tuning with `--codex-config key=value`, Codex-only `--codex-speed fast|flex|default`, and commit refs
 - supports `--stream-engine-output` or `AUTOREVIEW_STREAM_ENGINE_OUTPUT=1` for live engine text while preserving structured validation; Codex and Claude hide tool/file event details, emit compact activity summaries, and report usage at turn completion
 - supports opt-in review panels with `--panel` / `--reviewers`, plus per-engine `--model`, `--thinking`, and Claude `--fallback-model`
-- uses built-in defaults `codex=gpt-5.6-sol` with `max` reasoning and an access-only `gpt-5.6-terra` retry, plus `claude=claude-fable-5`; honors `AUTOREVIEW_MODEL`, `AUTOREVIEW_THINKING`, `AUTOREVIEW_FALLBACK_MODEL`, and per-engine `AUTOREVIEW_<ENGINE>_MODEL` / `AUTOREVIEW_<ENGINE>_THINKING` environment overrides when CLI flags are omitted
+- uses built-in defaults `codex=gpt-5.6-sol` with `max` reasoning and an access-only `gpt-5.6-terra` retry, plus `claude=claude-opus-5` with `max` reasoning; honors `AUTOREVIEW_MODEL`, `AUTOREVIEW_THINKING`, `AUTOREVIEW_FALLBACK_MODEL`, and per-engine `AUTOREVIEW_<ENGINE>_MODEL` / `AUTOREVIEW_<ENGINE>_THINKING` environment overrides when CLI flags are omitted
 - gives Codex the bundle in an empty workspace with web search available; Claude receives the bundle plus WebSearch by default and optional domain-constrained WebFetch; Pi and Kimi receive the bundle with no tools
 - runs Claude with `--safe-mode` (`v2.1.169+`), `--setting-sources user`, MCP and auto-memory disabled, no filesystem/shell tools, an empty external workspace, and `--fallback-model` when set
 - refuses Droid, Copilot, Cursor, and OpenCode reviews until their CLIs expose the required project, filesystem, and network isolation

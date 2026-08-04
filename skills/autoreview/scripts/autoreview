@@ -789,11 +789,12 @@ TEST_ENV_ALLOWED_EXACT = {
 TEST_ENV_ALLOWED_PREFIXES = ("AUTOREVIEW_FAKE_", "LC_")
 DEFAULT_MODEL_BY_ENGINE = {
     "codex": "gpt-5.6-sol",
-    "claude": "claude-fable-5",
+    "claude": "claude-opus-5",
 }
 DEFAULT_CODEX_ACCESS_FALLBACK_MODEL = "gpt-5.6-terra"
 DEFAULT_THINKING_BY_ENGINE = {
     "codex": "max",
+    "claude": "max",
 }
 THINKING_LEVELS_BY_ENGINE = {
     "codex": {"none", "minimal", "low", "medium", "high", "xhigh", "max"},
@@ -12291,7 +12292,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         action="append",
-        help="Model for all reviewers or engine=model. Repeatable. Defaults: codex=gpt-5.6-sol with an access-only gpt-5.6-terra retry, claude=claude-fable-5.",
+        help="Model for all reviewers or engine=model. Repeatable. Defaults: codex=gpt-5.6-sol with an access-only gpt-5.6-terra retry, claude=claude-opus-5.",
     )
     parser.add_argument("--thinking", action="append", help="Thinking/effort for all reviewers or engine=level. Repeatable. Codex: none, minimal, low, medium, high, xhigh, max. Claude: low, medium, high, xhigh, max. Droid: off, none, low, medium, high. Pi: off, minimal, low, medium, high, xhigh. Kimi: off, on. OpenCode: minimal, low, medium, high, max. Cursor: none.")
     parser.add_argument(
@@ -12759,8 +12760,12 @@ def self_test_config_defaults() -> None:
         if max_effort.thinking != "max":
             raise SystemExit("self-test config defaults failed: Codex max thinking should be accepted")
         default_claude = reviewer_args(reviewer_test_args(engine="claude"))[0]
-        if default_claude.model != "claude-fable-5":
+        if default_claude.model != "claude-opus-5":
             raise SystemExit(f"self-test config defaults failed: default claude model={default_claude.model!r}")
+        if default_claude.thinking != "max":
+            raise SystemExit(
+                f"self-test config defaults failed: default claude thinking={default_claude.thinking!r}"
+            )
         os.environ["AUTOREVIEW_MODEL"] = "env-global-model"
         os.environ["AUTOREVIEW_CODEX_MODEL"] = "env-codex-model"
         os.environ["AUTOREVIEW_THINKING"] = "low"
