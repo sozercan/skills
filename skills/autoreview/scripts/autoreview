@@ -10,7 +10,6 @@ import concurrent.futures
 import copy
 import functools
 import hashlib
-import ipaddress
 import io
 import json
 import math
@@ -9743,49 +9742,18 @@ def load_codex_auth_config(path: Path) -> dict[str, Any]:
     return config if isinstance(config, dict) else {}
 
 
-def codex_source_home(
-    repo: Path,
-    *,
-    fail_on_unsafe: bool = False,
-) -> Path | None:
+def codex_source_home(repo: Path) -> Path | None:
     raw = os.environ.get("CODEX_HOME", "").strip()
-    explicitly_configured = bool(raw)
     candidate = Path(raw).expanduser() if raw else Path.home() / ".codex"
     try:
         resolved = candidate.resolve()
-    except OSError as exc:
-        if fail_on_unsafe:
-            raise SystemExit(
-                f"unable to resolve Codex home for endpoint routing: {candidate}"
-            ) from exc
+    except OSError:
         return None
-    try:
-        home_stat = resolved.stat()
-    except FileNotFoundError:
-        if fail_on_unsafe and explicitly_configured:
-            raise SystemExit(
-                f"configured CODEX_HOME does not exist for endpoint routing: {candidate}"
-            )
-        return None
-    except OSError as exc:
-        if fail_on_unsafe:
-            raise SystemExit(
-                f"unable to inspect Codex home for endpoint routing: {candidate}"
-            ) from exc
-        return None
-    if not stat.S_ISDIR(home_stat.st_mode):
-        if fail_on_unsafe:
-            raise SystemExit(
-                f"unsafe Codex home for endpoint routing; expected a directory: {candidate}"
-            )
-        return None
-    if is_within(resolved, repo.resolve()):
-        if fail_on_unsafe:
-            raise SystemExit(
-                "Codex home for endpoint routing must remain outside the reviewed repository"
-            )
-        return None
-    return resolved
+    return (
+        resolved
+        if resolved.is_dir() and external_env_path(repo, str(resolved))
+        else None
+    )
 
 
 def codex_auth_config_flags(repo: Path, *, force_file: bool = False) -> list[str]:
@@ -9800,6 +9768,11 @@ def codex_auth_config_flags(repo: Path, *, force_file: bool = False) -> list[str
     flags: list[str] = (
         ["-c", 'cli_auth_credentials_store="file"'] if force_file else []
     )
+    base_url = config.get("openai_base_url")
+    if isinstance(base_url, str) and base_url:
+        flags.extend(
+            ["-c", f"openai_base_url={json.dumps(base_url, ensure_ascii=False)}"]
+        )
     if not force_file:
         value = config.get("cli_auth_credentials_store")
         if isinstance(value, str) and value in {"file", "keyring", "auto", "ephemeral"}:
@@ -9820,182 +9793,6 @@ def codex_auth_config_flags(repo: Path, *, force_file: bool = False) -> list[str
         if normalized_workspace_ids:
             flags.extend(["-c", f"forced_chatgpt_workspace_id={json.dumps(normalized_workspace_ids)}"])
     return flags
-
-
-def codex_base_url_is_loopback(hostname: str) -> bool:
-    normalized = hostname.lower()
-    if normalized == "localhost":
-        return True
-    if "%" in normalized:
-        return False
-    try:
-        address = ipaddress.ip_address(normalized)
-    except ValueError:
-        return False
-    if isinstance(address, ipaddress.IPv4Address) and str(address) != normalized:
-        return False
-    return address.is_loopback
-
-
-def validated_codex_base_url(value: str, source: str) -> str:
-    if (
-        value != value.strip()
-        or "\\" in value
-        or any(
-            character.isspace()
-            or unicodedata.category(character).startswith("C")
-            for character in value
-        )
-    ):
-        raise SystemExit(f"invalid Codex base URL from {source}")
-    try:
-        parsed = urllib.parse.urlsplit(value)
-        _ = parsed.port
-    except ValueError as exc:
-        raise SystemExit(f"invalid Codex base URL from {source}") from exc
-    scheme = parsed.scheme.lower()
-    hostname = parsed.hostname
-    if (
-        scheme not in {"http", "https"}
-        or not hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or "%" in hostname
-        or "?" in value
-        or "#" in value
-    ):
-        raise SystemExit(
-            f"unsafe Codex base URL from {source}; use a credential-free HTTP(S) URL "
-            "without a query or fragment"
-        )
-    if scheme == "http" and not codex_base_url_is_loopback(hostname):
-        raise SystemExit(
-            f"unsafe Codex base URL from {source}; remote endpoints require HTTPS "
-            "and plain HTTP is allowed only for localhost or a loopback IP"
-        )
-    return value
-
-
-def codex_loopback_no_proxy_env(
-    env: dict[str, str],
-    base_url: str | None,
-) -> dict[str, str]:
-    if base_url is None:
-        return env
-    parsed = urllib.parse.urlsplit(base_url)
-    hostname = parsed.hostname
-    if hostname is None or not codex_base_url_is_loopback(hostname):
-        return env
-
-    entries: list[str] = []
-    seen: set[str] = set()
-    for key in ("NO_PROXY", "no_proxy"):
-        for raw_entry in env.get(key, "").split(","):
-            entry = raw_entry.strip()
-            normalized = entry.casefold()
-            if entry and normalized not in seen:
-                entries.append(entry)
-                seen.add(normalized)
-
-    targets = [hostname]
-    if parsed.port is not None and ":" not in hostname:
-        targets.append(f"{hostname}:{parsed.port}")
-    if ":" in hostname:
-        targets.append(f"[{hostname}]")
-        if parsed.port is not None:
-            targets.append(f"[{hostname}]:{parsed.port}")
-    for target in targets:
-        normalized = target.casefold()
-        if normalized not in seen:
-            entries.append(target)
-            seen.add(normalized)
-
-    merged = ",".join(entries)
-    env["NO_PROXY"] = merged
-    env["no_proxy"] = merged
-    return env
-
-
-def load_codex_base_url_config(repo: Path, config_path: Path) -> str | None:
-    try:
-        config_stat = config_path.lstat()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise SystemExit(
-            f"unable to inspect Codex config for endpoint routing: {config_path}"
-        ) from exc
-    if not stat.S_ISREG(config_stat.st_mode):
-        raise SystemExit(
-            f"unsafe Codex config for endpoint routing; expected a regular non-symlink file: {config_path}"
-        )
-    if config_stat.st_size > 1_000_000:
-        raise SystemExit(
-            f"Codex config is too large for endpoint routing validation: {config_path}"
-        )
-    try:
-        resolved = config_path.resolve(strict=True)
-    except OSError as exc:
-        raise SystemExit(
-            f"unable to resolve Codex config for endpoint routing: {config_path}"
-        ) from exc
-    if is_within(resolved, repo.resolve()):
-        raise SystemExit(
-            "Codex config for endpoint routing must remain outside the reviewed repository"
-        )
-    try:
-        data, truncated = read_prefix(config_path, 1_000_000)
-        text = data.decode("utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise SystemExit(
-            f"unable to read Codex config for endpoint routing: {config_path}"
-        ) from exc
-    if truncated:
-        raise SystemExit(
-            f"Codex config is too large for endpoint routing validation: {config_path}"
-        )
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        try:
-            import tomli as tomllib  # type: ignore[import-not-found,no-redef]
-        except ModuleNotFoundError:
-            raise SystemExit(
-                "Codex config endpoint routing requires a real TOML parser; "
-                f"use Python 3.11+ or install tomli to parse {config_path}"
-            )
-    try:
-        loaded = tomllib.loads(text)
-    except ValueError as exc:
-        raise SystemExit(
-            f"invalid Codex config for endpoint routing: {config_path}"
-        ) from exc
-    if not isinstance(loaded, dict):
-        raise SystemExit(
-            f"invalid Codex config for endpoint routing: {config_path}"
-        )
-    if "openai_base_url" not in loaded:
-        return None
-    value = loaded.get("openai_base_url")
-    if not isinstance(value, str) or not value:
-        raise SystemExit(
-            f"invalid openai_base_url in {config_path}; expected a non-empty string"
-        )
-    return value
-
-
-def codex_base_url_setting(repo: Path) -> str | None:
-    codex_home = codex_source_home(repo, fail_on_unsafe=True)
-    if codex_home is None:
-        return None
-    config_path = codex_home / "config.toml"
-    value = load_codex_base_url_config(repo, config_path)
-    if value is None:
-        return None
-    return validated_codex_base_url(
-        value,
-        f"{config_path}:openai_base_url",
-    )
 
 
 def prepare_codex_runtime_auth(
@@ -10483,7 +10280,6 @@ def codex_command(
     schema_path: Path,
     output_path: Path,
     model: str | None,
-    base_url: str | None,
     *,
     force_file_auth: bool = False,
 ) -> list[str]:
@@ -10502,13 +10298,6 @@ def codex_command(
     speed_override = codex_speed_override(args)
     if speed_override is not None:
         cmd.extend(["-c", speed_override])
-    if base_url is not None:
-        cmd.extend(
-            [
-                "-c",
-                f"openai_base_url={json.dumps(base_url, ensure_ascii=False)}",
-            ]
-        )
     cmd.extend(codex_config_isolation_flags(review_root, runtime_root))
     cmd.extend(codex_auth_config_flags(source_repo, force_file=force_file_auth))
     cmd.append("exec")
@@ -10543,7 +10332,6 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
     ) as output_file:
         output_path = Path(output_file.name)
     models = [args.model]
-    base_url = codex_base_url_setting(repo)
     fallback_model = getattr(args, "fallback_model", None)
     if fallback_model and fallback_model != args.model:
         models.append(fallback_model)
@@ -10593,27 +10381,8 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
                     schema_path,
                     output_path,
                     model,
-                    base_url,
                     force_file_auth=file_auth_linked,
                 )
-                engine_env = safe_engine_env(
-                    repo,
-                    [Path(cmd[0]).parent],
-                    engine="codex",
-                    extra={
-                        "HOME": str(runtime_home),
-                        "USERPROFILE": str(runtime_home),
-                        "XDG_CACHE_HOME": str(runtime_cache),
-                        "XDG_CONFIG_HOME": str(runtime_config),
-                        "XDG_DATA_HOME": str(runtime_data),
-                        "XDG_STATE_HOME": str(runtime_state),
-                        # Keyring namespaces are derived from canonical CODEX_HOME.
-                        # Linked file auth uses the isolated home; keyring/auto must
-                        # retain the source namespace until Codex supports an auth split.
-                        "CODEX_HOME": str(active_codex_home),
-                    },
-                )
-                codex_loopback_no_proxy_env(engine_env, base_url)
                 result = run_with_heartbeat(
                     cmd,
                     review_root,
@@ -10621,7 +10390,23 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
                     label="codex",
                     stream_output=args.stream_engine_output,
                     stream_display=CodexStreamDisplay() if args.stream_engine_output else None,
-                    env=engine_env,
+                    env=safe_engine_env(
+                        repo,
+                        [Path(cmd[0]).parent],
+                        engine="codex",
+                        extra={
+                            "HOME": str(runtime_home),
+                            "USERPROFILE": str(runtime_home),
+                            "XDG_CACHE_HOME": str(runtime_cache),
+                            "XDG_CONFIG_HOME": str(runtime_config),
+                            "XDG_DATA_HOME": str(runtime_data),
+                            "XDG_STATE_HOME": str(runtime_state),
+                            # Keyring namespaces are derived from canonical CODEX_HOME.
+                            # Linked file auth uses the isolated home; keyring/auto must
+                            # retain the source namespace until Codex supports an auth split.
+                            "CODEX_HOME": str(active_codex_home),
+                        },
+                    ),
                     resolve_root=repo,
                 )
                 output = output_path.read_text()
