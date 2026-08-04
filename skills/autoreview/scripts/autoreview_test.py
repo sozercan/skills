@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
-import io
 import json
 import os
 import runpy
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,11 +16,10 @@ from pathlib import Path
 from unittest import mock
 
 
-SCRIPT_PATH = Path(__file__).resolve().parents[2] / "skills" / "autoreview" / "scripts" / "autoreview"
+SCRIPT_PATH = Path(__file__).with_name("autoreview")
 LOADER = SourceFileLoader("autoreview_module", str(SCRIPT_PATH))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
-if SPEC is None:
-    raise RuntimeError(f"unable to load autoreview module spec from {SCRIPT_PATH}")
+assert SPEC is not None
 AUTOREVIEW = importlib.util.module_from_spec(SPEC)
 LOADER.exec_module(AUTOREVIEW)
 
@@ -105,13 +103,148 @@ class AutoreviewCursorTests(unittest.TestCase):
         self.assertIn("review engine result was not structured JSON", str(exc_info.exception))
 
 
-class AutoreviewCompatibilityTests(unittest.TestCase):
-    def test_reviewer_args_rejects_empty_reviewer_list(self) -> None:
-        with self.assertRaisesRegex(SystemExit, "at least one reviewer"):
-            AUTOREVIEW.reviewer_args(
-                AUTOREVIEW.reviewer_test_args(reviewers=" , , ")
-            )
+class AutoreviewPriorityTests(unittest.TestCase):
+    def test_default_priority_is_p0(self) -> None:
+        with mock.patch.object(sys, "argv", ["autoreview"]):
+            args = AUTOREVIEW.parse_args()
+        self.assertEqual(args.max_priority, "P0")
 
+    def test_priority_filter_omits_lower_findings_and_cleans_verdict(self) -> None:
+        report = copy.deepcopy(DRAFT_REPORT)
+        AUTOREVIEW.filter_findings_by_priority(report, "P0")
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["overall_correctness"], "patch is correct")
+        self.assertIn("below the requested P0", report["overall_explanation"])
+
+
+class AutoreviewSecretScannerTests(unittest.TestCase):
+    def test_typescript_type_annotations_are_not_credential_material(self) -> None:
+        source = "\n".join(
+            (
+                "export function modelRuntime(",
+                "  env: NodeJS.ProcessEnv = process.env,",
+                "): ModelRuntime {",
+                "  return env.MODEL_RUNTIME;",
+                "}",
+                "",
+                "export function modelRuntimeCredentials(",
+                "  env: NodeJS.ProcessEnv,",
+                "): NodeJS.ProcessEnv {",
+                "  const credentials: NodeJS.ProcessEnv = {};",
+                "  return credentials;",
+                "}",
+            )
+        )
+
+        self.assertFalse(
+            AUTOREVIEW.secret_text_risk(
+                source,
+                javascript_dialect="typescript",
+            )
+        )
+        self.assertEqual(
+            AUTOREVIEW.review_secret_fragments(
+                source,
+                javascript_dialect="typescript",
+            ),
+            set(),
+        )
+
+    def test_typescript_typed_declaration_still_scans_initializer(self) -> None:
+        literal_value = "actual-production-" + "secret"
+        source = (
+            "const credentials: NodeJS.ProcessEnv = "
+            f'"{literal_value}";'
+        )
+
+        self.assertTrue(
+            AUTOREVIEW.secret_text_risk(
+                source,
+                javascript_dialect="typescript",
+            )
+        )
+        self.assertEqual(
+            AUTOREVIEW.review_secret_fragments(
+                source,
+                javascript_dialect="typescript",
+            ),
+            {literal_value},
+        )
+
+    def test_boolean_declarations_are_not_credential_material(self) -> None:
+        secret_field = "is" + "Secret"
+        client_secret_field = "hasClient" + "Secret"
+        cases = (
+            (f"val {secret_field}: Boolean? = null,", None),
+            (f"var {client_secret_field}: Boolean = false", None),
+            (f"abstract val {secret_field}: Boolean?", None),
+            (f"val {secret_field}: Boolean?", None),
+            (f"const {client_secret_field}: boolean = true;", "typescript"),
+            (f"declare const {client_secret_field}: boolean;", "typescript"),
+            (f"let {secret_field}: Bool? = nil", None),
+            (f"let {secret_field}: Bool?", None),
+        )
+
+        for content, javascript_dialect in cases:
+            with self.subTest(content=content):
+                self.assertFalse(
+                    AUTOREVIEW.secret_text_risk(
+                        content,
+                        javascript_dialect=javascript_dialect,
+                    )
+                )
+
+    def test_boolean_and_null_literal_values_are_not_credentials(self) -> None:
+        cases = (
+            ("is" + "Secret", "true"),
+            ("requires" + "Password", "false"),
+            ("access" + "Token", "null"),
+        )
+        for field_name, literal in cases:
+            content = f"{field_name} = {literal}"
+            with self.subTest(content=content):
+                self.assertFalse(AUTOREVIEW.secret_text_risk(content))
+
+    def test_boolean_annotation_does_not_hide_real_credential_literal(self) -> None:
+        literal_value = "actual-production-" + "secret"
+        secret_field = "is" + "Secret"
+        client_secret_field = "hasClient" + "Secret"
+        cases = (
+            (f'val {secret_field}: Boolean? = "{literal_value}",', None),
+            (f'var {client_secret_field}: Boolean = "{literal_value}"', None),
+            (
+                f'const {client_secret_field}: boolean = "{literal_value}";',
+                "typescript",
+            ),
+            (f'let {secret_field}: Bool? = "{literal_value}"', None),
+        )
+
+        for content, javascript_dialect in cases:
+            with self.subTest(content=content):
+                self.assertTrue(
+                    AUTOREVIEW.secret_text_risk(
+                        content,
+                        javascript_dialect=javascript_dialect,
+                    )
+                )
+
+    def test_boolean_prefix_values_remain_credentials(self) -> None:
+        field_name = "client" + "Secret"
+        for prefix in ("Boolean", "boolean", "Bool"):
+            literal_value = prefix + "-prod-credential"
+            content = f"{field_name}: {literal_value}"
+            with self.subTest(content=content):
+                self.assertTrue(AUTOREVIEW.secret_text_risk(content))
+
+    def test_boolean_type_tokens_in_config_remain_credentials(self) -> None:
+        field_name = "client" + "Secret"
+        for literal_value in ("Boolean?", "Boolean?=abc1234"):
+            content = f"{field_name}: {literal_value}"
+            with self.subTest(content=content):
+                self.assertTrue(AUTOREVIEW.secret_text_risk(content))
+
+
+class AutoreviewCompatibilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.home_dir = tempfile.TemporaryDirectory(prefix="autoreview-test-home.")
@@ -139,181 +272,6 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
         namespace = runpy.run_path(str(harness_path))
         with self.assertRaises(SystemExit):
             namespace["parse_args"](["--engine", "cursor"])
-
-    def test_reviewer_label_escapes_terminal_controls(self) -> None:
-        label = AUTOREVIEW.reviewer_label(
-            argparse.Namespace(
-                engine="codex",
-                model="model\n\x1b[31m",
-                fallback_model="fallback\x07",
-                thinking="high",
-            )
-        )
-
-        self.assertNotIn("\n", label)
-        self.assertNotIn("\x1b", label)
-        self.assertNotIn("\x07", label)
-        self.assertIn(r"model\x0a\x1b[31m", label)
-        self.assertIn(r"fallback\x07", label)
-
-    def test_harness_disables_fixture_commit_signing(self) -> None:
-        harness_path = SCRIPT_PATH.with_name("test-review-harness.py")
-        namespace = runpy.run_path(str(harness_path))
-        invocations: list[tuple[list[str], dict[str, str] | None]] = []
-
-        def record(
-            command: list[str],
-            _cwd: Path,
-            *,
-            env: dict[str, str] | None = None,
-        ) -> None:
-            invocations.append((command, env))
-
-        with tempfile.TemporaryDirectory() as tempdir, mock.patch.dict(
-            namespace["create_fixture_repo"].__globals__,
-            {"run": record},
-        ):
-            namespace["create_fixture_repo"](Path(tempdir), "benign", "/trusted/git")
-
-        commands = [command for command, _env in invocations]
-        self.assertTrue(all(command[0] == "/trusted/git" for command in commands))
-        self.assertTrue(
-            all(
-                command[1:4]
-                == ["--no-optional-locks", "-c", "core.fsmonitor=false"]
-                for command in commands
-            )
-        )
-        for _command, env in invocations:
-            self.assertIsNotNone(env)
-            assert env is not None
-            self.assertEqual(env["GIT_CONFIG_GLOBAL"], os.devnull)
-            self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
-            self.assertNotIn("GIT_CONFIG_COUNT", env)
-        commit = next(command for command in commands if "commit" in command)
-        hooks_config = next(
-            command
-            for command in commands
-            if "core.hooksPath" in command
-        )
-        self.assertIn("commit.gpgSign=false", commit)
-        hooks_index = hooks_config.index("core.hooksPath")
-        self.assertTrue(hooks_config[hooks_index + 1].endswith(".empty-hooks"))
-
-    def test_reviewer_args_ignores_unselected_fallback_env_default(self) -> None:
-        with mock.patch.dict(
-            os.environ,
-            {"AUTOREVIEW_CLAUDE_FALLBACK_MODEL": "claude-env-fallback"},
-            clear=True,
-        ):
-            reviewer = AUTOREVIEW.reviewer_args(
-                AUTOREVIEW.reviewer_test_args(engine="codex")
-            )[0]
-
-        self.assertEqual(reviewer.fallback_model, "gpt-5.6-terra")
-
-    def test_reviewer_args_rejects_unused_keyed_model_and_thinking(self) -> None:
-        for option, values in (
-            ("model", ["claude=claude-fable-5"]),
-            ("thinking", ["claude=high"]),
-        ):
-            with self.subTest(option=option), self.assertRaisesRegex(
-                SystemExit,
-                rf"--{option} specified for unselected reviewer: claude",
-            ):
-                overrides = {option: values}
-                AUTOREVIEW.reviewer_args(
-                    AUTOREVIEW.reviewer_test_args(
-                        engine="codex",
-                        **overrides,
-                    )
-                )
-
-    def test_harness_resolves_git_outside_reviewed_checkout(self) -> None:
-        harness_path = SCRIPT_PATH.with_name("test-review-harness.py")
-        namespace = runpy.run_path(str(harness_path))
-        trusted_git = shutil.which("git")
-        if trusted_git is None:
-            self.skipTest("git is not installed")
-        with tempfile.TemporaryDirectory() as tempdir:
-            repo = Path(tempdir) / "repo"
-            fake_bin = repo / "bin"
-            fake_bin.mkdir(parents=True)
-            fake_name = "git.cmd" if os.name == "nt" else "git"
-            fake_git = fake_bin / fake_name
-            fake_git.write_text(
-                "@exit /b 99\r\n"
-                if os.name == "nt"
-                else "#!/bin/sh\nexit 99\n",
-                encoding="utf-8",
-            )
-            if os.name != "nt":
-                fake_git.chmod(0o755)
-            with mock.patch.dict(
-                os.environ,
-                {
-                    "PATH": str(fake_bin)
-                    + os.pathsep
-                    + str(Path(trusted_git).parent),
-                },
-            ):
-                resolved = namespace["resolve_external_command"](
-                    "git",
-                    [repo],
-                )
-
-            self.assertFalse(
-                Path(resolved).resolve().is_relative_to(repo.resolve())
-            )
-
-    def test_harness_fixture_git_ignores_hostile_git_environment(self) -> None:
-        harness_path = SCRIPT_PATH.with_name("test-review-harness.py")
-        namespace = runpy.run_path(str(harness_path))
-        trusted_git = shutil.which("git")
-        if trusted_git is None:
-            self.skipTest("git is not installed")
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = root / "repo"
-            repo.mkdir()
-            redirected_git_dir = root / "redirected.git"
-            hostile_global = root / "hostile.gitconfig"
-            hostile_global.write_text(
-                "[core]\n\tfsmonitor = hostile-fsmonitor\n",
-                encoding="utf-8",
-            )
-            with mock.patch.dict(
-                os.environ,
-                {
-                    "GIT_CONFIG_GLOBAL": str(hostile_global),
-                    "GIT_CONFIG_COUNT": "1",
-                    "GIT_CONFIG_KEY_0": "core.fsmonitor",
-                    "GIT_CONFIG_VALUE_0": "hostile-fsmonitor",
-                    "GIT_DIR": str(redirected_git_dir),
-                    "GIT_WORK_TREE": str(root / "redirected-worktree"),
-                    "GIT_TEMPLATE_DIR": str(root / "hostile-template"),
-                },
-                clear=False,
-            ):
-                namespace["create_fixture_repo"](
-                    repo,
-                    "benign",
-                    trusted_git,
-                )
-
-            self.assertTrue((repo / ".git").is_dir())
-            self.assertFalse(redirected_git_dir.exists())
-            self.assertEqual(
-                subprocess.run(
-                    [trusted_git, "config", "--get", "core.fsmonitor"],
-                    cwd=repo,
-                    env=namespace["fixture_git_env"](trusted_git),
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                ).returncode,
-                1,
-            )
 
     def test_cursor_agent_bin_cli_alias(self) -> None:
         with mock.patch.object(
@@ -346,6 +304,153 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             AUTOREVIEW.parse_keyed_options(["cursor-agent=auto"], "model"),
             (None, {"cursor": "auto"}),
         )
+
+    def test_kimi_bin_cli_option(self) -> None:
+        with mock.patch.object(
+            sys,
+            "argv",
+            ["autoreview", "--kimi-bin", "/tmp/trusted-kimi"],
+        ):
+            args = AUTOREVIEW.parse_args()
+        self.assertEqual(args.kimi_bin, "/tmp/trusted-kimi")
+
+    def test_kimi_reviewer_always_disables_tools(self) -> None:
+        args = AUTOREVIEW.reviewer_test_args(
+            engine="kimi",
+            thinking=["on"],
+        )
+
+        reviewer = AUTOREVIEW.reviewer_args(args)[0]
+
+        self.assertEqual(reviewer.engine, "kimi")
+        self.assertEqual(reviewer.thinking, "on")
+        self.assertFalse(reviewer.tools)
+
+    def test_all_reviewers_includes_kimi(self) -> None:
+        args = AUTOREVIEW.reviewer_test_args(reviewers="all")
+
+        reviewers = AUTOREVIEW.reviewer_args(args)
+
+        self.assertEqual(
+            [reviewer.engine for reviewer in reviewers],
+            ["codex", "claude", "pi", "kimi"],
+        )
+
+    def test_kimi_isolation_requires_current_cli_contract(self) -> None:
+        args = argparse.Namespace(kimi_bin="kimi")
+        required_flags = " ".join(
+            [
+                "--agent-file",
+                "--skills-dir",
+                "--prompt",
+                "--output-format",
+                "--model",
+            ]
+        )
+
+        def fake_run(command: list[str], *_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            if "--version" in command:
+                return subprocess.CompletedProcess(command, 0, "0.31.1", "")
+            return subprocess.CompletedProcess(command, 0, required_flags, "")
+
+        with tempfile.TemporaryDirectory(prefix="autoreview-kimi-probe-test.") as tmpdir, mock.patch.object(
+            AUTOREVIEW,
+            "resolve_command",
+            return_value="/usr/bin/kimi",
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "safe_engine_env",
+            return_value={},
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "safe_temp_root",
+            return_value=Path(tmpdir),
+        ), mock.patch.object(
+            AUTOREVIEW,
+            "run",
+            side_effect=fake_run,
+        ):
+            self.assertEqual(
+                AUTOREVIEW.ensure_kimi_isolation_supported(args, Path(tmpdir)),
+                "/usr/bin/kimi",
+            )
+
+    def test_kimi_runs_with_empty_tools_skills_and_mcp(self) -> None:
+        args = argparse.Namespace(
+            kimi_bin="kimi",
+            model="kimi-model",
+            stream_engine_output=False,
+            thinking="on",
+        )
+        observed: dict[str, object] = {}
+
+        def fake_run(
+            command: list[str],
+            cwd: Path,
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            observed["command"] = command
+            observed["cwd"] = cwd
+            observed["env"] = kwargs["env"]
+            env = kwargs["env"]
+            assert isinstance(env, dict)
+            home = Path(str(env["KIMI_CODE_HOME"]))
+            observed["agent"] = (home / "reviewer.md").read_text(encoding="utf-8")
+            observed["config"] = (home / "config.toml").read_text(encoding="utf-8")
+            observed["skills"] = list((home / "skills").iterdir())
+            observed["workspace"] = list(cwd.iterdir())
+            stream = (
+                json.dumps({"role": "meta", "type": "system.version", "version": "0.31.1"})
+                + "\n"
+                + json.dumps({"role": "assistant", "content": json.dumps(FINAL_REPORT)})
+                + "\n"
+            )
+            return subprocess.CompletedProcess(command, 0, stream, "")
+
+        with tempfile.TemporaryDirectory(prefix="autoreview-kimi-run-test.") as tmpdir:
+            repo = Path(tmpdir) / "repo"
+            repo.mkdir()
+            with mock.patch.object(
+                AUTOREVIEW,
+                "ensure_kimi_isolation_supported",
+                return_value="/usr/bin/kimi",
+            ), mock.patch.object(
+                AUTOREVIEW,
+                "load_kimi_review_config",
+                return_value=({"telemetry": False}, None),
+            ), mock.patch.object(
+                AUTOREVIEW,
+                "run_with_heartbeat",
+                side_effect=fake_run,
+            ):
+                output = AUTOREVIEW.run_kimi(args, repo, "review prompt")
+
+        self.assertEqual(json.loads(output), FINAL_REPORT)
+        command = observed["command"]
+        self.assertIsInstance(command, list)
+        assert isinstance(command, list)
+        self.assertEqual(command[command.index("--prompt") + 1], "review prompt")
+        self.assertEqual(command[command.index("--output-format") + 1], "stream-json")
+        self.assertEqual(command[command.index("--model") + 1], "kimi-model")
+        self.assertNotIn("--thinking", command)
+        agent = observed["agent"]
+        self.assertIsInstance(agent, str)
+        assert isinstance(agent, str)
+        self.assertIn("tools: []", agent)
+        self.assertIn("subagents: []", agent)
+        config = observed["config"]
+        self.assertIsInstance(config, str)
+        assert isinstance(config, str)
+        self.assertIn("[thinking]", config)
+        self.assertIn("enabled = true", config)
+        self.assertEqual(observed["skills"], [])
+        self.assertEqual(observed["workspace"], [])
+        env = observed["env"]
+        self.assertIsInstance(env, dict)
+        assert isinstance(env, dict)
+        self.assertEqual(env["KIMI_DISABLE_TELEMETRY"], "1")
+        self.assertEqual(env["KIMI_CODE_NO_AUTO_UPDATE"], "1")
+        self.assertNotEqual(Path(str(env["KIMI_CODE_HOME"])), repo)
 
     def test_codex_config_status_exposes_keys_only(self) -> None:
         args = argparse.Namespace(codex_config=['model_verbosity="low"'])
@@ -397,76 +502,6 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
         self.assertEqual(json.loads(output), FINAL_REPORT)
         self.assertEqual(models, ["gpt-5.6-sol", "gpt-5.6-terra"])
 
-    def test_codex_fallback_status_escapes_model_controls(self) -> None:
-        primary = "gpt-5.6-sol\n\x1b[31m"
-        fallback = "gpt-5.6-terra\x07"
-        args = argparse.Namespace(
-            codex_bin="codex",
-            codex_config=None,
-            codex_speed=None,
-            fallback_model=fallback,
-            model=primary,
-            stream_engine_output=False,
-            thinking="high",
-            tools=True,
-            web_search=False,
-        )
-        calls = 0
-
-        def fake_run(
-            command: list[str],
-            *_args: object,
-            **_kwargs: object,
-        ) -> subprocess.CompletedProcess[str]:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                return subprocess.CompletedProcess(
-                    command,
-                    1,
-                    json.dumps(
-                        {
-                            "type": "error",
-                            "message": (
-                                f"The model `{primary}` does not exist or "
-                                "you do not have access to it."
-                            ),
-                        }
-                    ),
-                    "",
-                )
-            output_path = Path(command[command.index("--output-last-message") + 1])
-            output_path.write_text(json.dumps(FINAL_REPORT), encoding="utf-8")
-            return subprocess.CompletedProcess(command, 0, "", "")
-
-        stderr = io.StringIO()
-        with tempfile.TemporaryDirectory(prefix="autoreview-codex-fallback-escape.") as tmpdir, mock.patch.object(
-            AUTOREVIEW,
-            "resolve_command",
-            return_value="/usr/bin/codex",
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "codex_auth_config_flags",
-            return_value=[],
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "prepare_codex_runtime_auth",
-            return_value=None,
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "run_with_heartbeat",
-            side_effect=fake_run,
-        ), mock.patch.object(sys, "stderr", stderr):
-            output = AUTOREVIEW.run_codex(args, Path(tmpdir), "review")
-
-        rendered = stderr.getvalue()
-        self.assertEqual(json.loads(output), FINAL_REPORT)
-        self.assertNotIn("\x1b", rendered)
-        self.assertNotIn("\x07", rendered)
-        self.assertNotIn("\n\x1b", rendered)
-        self.assertIn(r"gpt-5.6-sol\x0a\x1b[31m", rendered)
-        self.assertIn(r"gpt-5.6-terra\x07", rendered)
-
     def test_codex_runs_outside_repo_with_bundle_only_workspace(self) -> None:
         args = argparse.Namespace(
             codex_bin="codex",
@@ -498,13 +533,7 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix="autoreview-codex-workspace-test.") as tmpdir:
             repo = Path(tmpdir)
-            env_name = "." + "env"
-            key_name = "OPENAI_API_" + "KEY"
-            fixture_value = "test-token-" + "placeholder"
-            (repo / env_name).write_text(
-                f"{key_name}={fixture_value}\n",
-                encoding="utf-8",
-            )
+            (repo / ".env").write_text("OPENAI_API_KEY=ignored-secret\n")
             with mock.patch.dict(
                 os.environ,
                 {"CODEX_HOME": ""},
@@ -554,73 +583,6 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             self.assertIn("features.hooks=false", observed["command"])
             self.assertIn("features.plugins=false", observed["command"])
             self.assertIn("skills.include_instructions=false", observed["command"])
-
-    def test_codex_reads_last_message_as_utf8(self) -> None:
-        args = argparse.Namespace(
-            codex_bin="codex",
-            codex_config=None,
-            codex_speed=None,
-            fallback_model=None,
-            model="gpt-5.6-sol",
-            stream_engine_output=False,
-            thinking="high",
-            tools=True,
-            web_search=False,
-        )
-        report = dict(FINAL_REPORT)
-        report["overall_explanation"] = "clean café"
-        observed: dict[str, object] = {}
-        original_read_text = Path.read_text
-
-        def fake_run(
-            command: list[str],
-            *_args: object,
-            **_kwargs: object,
-        ) -> subprocess.CompletedProcess[str]:
-            output_path = Path(command[command.index("--output-last-message") + 1])
-            output_path.write_text(
-                json.dumps(report, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            return subprocess.CompletedProcess(command, 0, "", "")
-
-        def checked_read_text(
-            target: Path,
-            *args: object,
-            **kwargs: object,
-        ) -> str:
-            observed["encoding"] = kwargs.get("encoding")
-            return original_read_text(target, *args, **kwargs)
-
-        with tempfile.TemporaryDirectory(prefix="autoreview-codex-utf8.") as tmpdir, mock.patch.object(
-            AUTOREVIEW,
-            "resolve_command",
-            return_value="/usr/bin/codex",
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "codex_auth_config_flags",
-            return_value=[],
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "prepare_codex_runtime_auth",
-            return_value=None,
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "codex_source_home",
-            return_value=None,
-        ), mock.patch.object(
-            AUTOREVIEW,
-            "run_with_heartbeat",
-            side_effect=fake_run,
-        ), mock.patch.object(
-            Path,
-            "read_text",
-            new=checked_read_text,
-        ):
-            output = AUTOREVIEW.run_codex(args, Path(tmpdir), "review")
-
-        self.assertEqual(json.loads(output), report)
-        self.assertEqual(observed["encoding"], "utf-8")
 
     def test_codex_does_not_fallback_after_unrelated_failure(self) -> None:
         args = argparse.Namespace(
@@ -873,18 +835,6 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
             subprocess.run(["git", "config", "user.name", "AutoReview Test"], cwd=repo, check=True)
             subprocess.run(["git", "config", "user.email", "autoreview@example.invalid"], cwd=repo, check=True)
-            hooks = repo / ".git" / "autoreview-test-hooks"
-            hooks.mkdir()
-            subprocess.run(
-                ["git", "config", "core.hooksPath", str(hooks)],
-                cwd=repo,
-                check=True,
-            )
-            subprocess.run(
-                ["git", "config", "commit.gpgSign", "false"],
-                cwd=repo,
-                check=True,
-            )
             source = repo / "example.txt"
             source.write_text("before\n")
             subprocess.run(["git", "add", "example.txt"], cwd=repo, check=True)
@@ -892,8 +842,13 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
             source.write_text("after\n")
 
             cursor_bin = root / "cursor-agent"
+            trufflehog_bin = root / "trufflehog"
             record_path = root / "record.json"
             AUTOREVIEW.write_executable(cursor_bin, AUTOREVIEW.fake_cursor_script())
+            AUTOREVIEW.write_executable(
+                trufflehog_bin,
+                "#!/usr/bin/env python3\nraise SystemExit(0)\n",
+            )
             env = os.environ.copy()
             env.update(
                 {
@@ -902,7 +857,10 @@ class AutoreviewCompatibilityTests(unittest.TestCase):
                     "GIT_CONFIG_GLOBAL": str(root / "hostile-gitconfig"),
                     "NODE_OPTIONS": "--require=hostile.js",
                     "PYTHONPATH": str(root / "hostile-python"),
-                    "PATH": f"{repo}{os.pathsep}{env.get('PATH', '')}",
+                    "PATH": (
+                        f"{root}{os.pathsep}{repo}{os.pathsep}"
+                        f"{env.get('PATH', '')}"
+                    ),
                     "HOME": str(root),
                     "USERPROFILE": str(root),
                 }

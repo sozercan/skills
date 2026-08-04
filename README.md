@@ -10,14 +10,14 @@ skills/
 
 Each skill is self-contained. There are no category folders under `skills/` unless a future skill genuinely needs extra supporting files.
 
-Skills may include runtime support files such as `scripts/`. Non-runtime maintenance files live outside the install payload, for example in root-level `tests/` and `templates/`.
+Skills may include runtime support files such as `scripts/`. Locally maintained skills keep non-runtime maintenance files outside the install payload; fully vendored upstream skills may retain their canonical tests and fixtures in place.
 
 ## Available skills
 
 | Skill | Purpose |
 | --- | --- |
 | [`a365-cli`](skills/a365-cli/SKILL.md) | Safe user-facing operation of the `a365` CLI for Microsoft 365 through agent365 MCP servers. |
-| [`autoreview`](skills/autoreview/SKILL.md) | Structured closeout code review minimally adapted from OpenClaw. Defaults to Codex `gpt-5.6-sol` with `max` reasoning unless the user overrides it. |
+| [`autoreview`](skills/autoreview/SKILL.md) | Structured closeout code review minimally adapted from OpenClaw. Defaults to Codex `gpt-5.6-sol` and Claude `claude-opus-5`, both with `max` reasoning. |
 | [`kusto-cli`](skills/kusto-cli/SKILL.md) | Safe user-facing operation of `kusto-cli` for Azure Data Explorer/Kusto terminal work. |
 | [`kindctl`](skills/kindctl/SKILL.md) | Repo/worktree-scoped kind cluster management. Installs only the skill docs and runtime `scripts/kindctl`; tests and templates stay outside the skill payload. |
 
