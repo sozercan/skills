@@ -793,7 +793,7 @@ DEFAULT_MODEL_BY_ENGINE = {
 }
 DEFAULT_CODEX_ACCESS_FALLBACK_MODEL = "gpt-5.6-terra"
 DEFAULT_THINKING_BY_ENGINE = {
-    "codex": "high",
+    "codex": "max",
 }
 THINKING_LEVELS_BY_ENGINE = {
     "codex": {"none", "minimal", "low", "medium", "high", "xhigh", "max"},
@@ -12753,7 +12753,7 @@ def self_test_config_defaults() -> None:
             raise SystemExit(
                 f"self-test config defaults failed: explicit Sol access fallback={explicit_sol.fallback_model!r}"
             )
-        if default_codex.thinking != "high":
+        if default_codex.thinking != "max":
             raise SystemExit(f"self-test config defaults failed: default codex thinking={default_codex.thinking!r}")
         max_effort = reviewer_args(reviewer_test_args(engine="codex", thinking=["max"]))[0]
         if max_effort.thinking != "max":

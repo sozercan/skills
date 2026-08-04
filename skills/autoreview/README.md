@@ -1,6 +1,6 @@
 # Autoreview
 
-This directory vendors the OpenClaw `autoreview` skill with one downstream compatibility override.
+This directory vendors the OpenClaw `autoreview` skill with two narrow downstream overrides.
 
 ## Upstream
 
@@ -8,11 +8,14 @@ This directory vendors the OpenClaw `autoreview` skill with one downstream compa
 - Source snapshot: [`skills/autoreview` at commit `2a409d348a4bcf6f15e41e9a20efd0b298a32528`](https://github.com/openclaw/agent-skills/tree/2a409d348a4bcf6f15e41e9a20efd0b298a32528/skills/autoreview)
 - Commit: [`2a409d348a4bcf6f15e41e9a20efd0b298a32528`](https://github.com/openclaw/agent-skills/commit/2a409d348a4bcf6f15e41e9a20efd0b298a32528) (`docs(skills): add readme-standard house README skill`, August 2, 2026)
 
-The vendored skill matches that snapshot except for the compatibility override below and this provenance README.
+The vendored skill matches that snapshot except for the two overrides below and this provenance README.
 
-## Local difference
+## Local differences
 
-Codex runs with `--ignore-user-config`, so the downstream copy also preserves `openai_base_url` from the external `CODEX_HOME/config.toml` and passes it as an explicit Codex configuration override. `SKILL.md` documents the same exception. No other skill behavior is intentionally changed.
+- Codex defaults to `gpt-5.6-sol` with `max` reasoning instead of upstream's `high` reasoning.
+- Codex runs with `--ignore-user-config`, so the downstream copy also preserves `openai_base_url` from the external `CODEX_HOME/config.toml` and passes it as an explicit Codex configuration override.
+
+`SKILL.md` documents both exceptions. No other skill behavior is intentionally changed.
 
 ## Upstream license
 
