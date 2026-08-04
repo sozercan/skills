@@ -6237,6 +6237,143 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 os.environ.clear()
                 os.environ.update(old)
 
+    def _run_codex_base_url_case(
+        self,
+        root: Path,
+        *,
+        config_url: str,
+        extra_env: dict[str, str] | None = None,
+        invocations: list[tuple[list[str], dict[str, str]]] | None = None,
+    ) -> list[tuple[list[str], dict[str, str]]]:
+        repo = init_repo(root)
+        source_home = root / "host-home" / ".codex"
+        source_home.mkdir(parents=True)
+        (source_home / "config.toml").write_text(
+            f"openai_base_url = {json.dumps(config_url)}\n",
+            encoding="utf-8",
+        )
+        args = argparse.Namespace(
+            codex_bin="codex",
+            codex_config=None,
+            codex_speed=None,
+            fallback_model=None,
+            model="gpt-5.6-sol",
+            stream_engine_output=False,
+            thinking="high",
+            tools=True,
+            web_search=False,
+        )
+        observed = invocations if invocations is not None else []
+
+        def fake_run(
+            command: list[str],
+            _cwd: Path,
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            env = kwargs["env"]
+            assert isinstance(env, dict)
+            observed.append((command, dict(env)))
+            output_path = Path(command[command.index("--output-last-message") + 1])
+            output_path.write_text("{}", encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        env = {"CODEX_HOME": str(source_home)}
+        env.update(extra_env or {})
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.dict(
+            self.helper["run_codex"].__globals__,
+            {
+                "resolve_command": lambda *_args: "/usr/bin/codex",
+                "run_with_heartbeat": fake_run,
+            },
+        ):
+            output = self.helper["run_codex"](args, repo, "review")
+
+        self.assertEqual(output, "{}")
+        return observed
+
+    @staticmethod
+    def _codex_base_url_flags(command: list[str]) -> list[str]:
+        return [
+            command[index + 1]
+            for index, item in enumerate(command[:-1])
+            if item == "-c"
+            and command[index + 1].startswith("openai_base_url=")
+        ]
+
+    def test_codex_configured_base_url_survives_user_config_isolation(self) -> None:
+        url = "http://localhost:1337/v1"
+        with tempfile.TemporaryDirectory() as tempdir:
+            invocations = self._run_codex_base_url_case(
+                Path(tempdir),
+                config_url=url,
+            )
+
+        command, _env = invocations[0]
+        self.assertIn("--ignore-user-config", command)
+        self.assertEqual(
+            self._codex_base_url_flags(command),
+            [f"openai_base_url={json.dumps(url)}"],
+        )
+
+    def test_codex_configured_base_url_rejects_unsafe_values(self) -> None:
+        cases = (
+            "http://proxy.example.invalid/v1",
+            "https://" + "alice:opaque@" + "proxy.example.invalid/v1",
+            "https://proxy example.invalid/v1",
+            "\x01https://proxy.example.invalid/v1",
+            "http://[::1%scope,openai.com]:1337/v1",
+        )
+        for url in cases:
+            with self.subTest(url=repr(url)), tempfile.TemporaryDirectory() as tempdir:
+                invocations: list[tuple[list[str], dict[str, str]]] = []
+                with self.assertRaises(SystemExit):
+                    self._run_codex_base_url_case(
+                        Path(tempdir),
+                        config_url=url,
+                        invocations=invocations,
+                    )
+                self.assertEqual(invocations, [])
+
+    def test_codex_loopback_base_url_forces_proxy_bypass(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            invocations = self._run_codex_base_url_case(
+                Path(tempdir),
+                config_url="http://localhost:1337/v1",
+                extra_env={
+                    "HTTP_PROXY": "http://proxy.example.invalid:8080",
+                    "ALL_PROXY": "socks5://proxy.example.invalid:1080",
+                    "NO_PROXY": "existing.example.invalid",
+                },
+            )
+
+        _command, child_env = invocations[0]
+        expected_entries = {
+            "existing.example.invalid",
+            "localhost",
+            "localhost:1337",
+        }
+        for key in ("NO_PROXY", "no_proxy"):
+            self.assertTrue(expected_entries.issubset(set(child_env[key].split(","))))
+
+    def test_codex_base_url_rejects_repo_local_codex_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            config_dir = repo / ".codex"
+            config_dir.mkdir()
+            (config_dir / "config.toml").write_text(
+                'openai_base_url = "http://localhost:1337/v1"\n',
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {"CODEX_HOME": str(config_dir)},
+                clear=True,
+            ), self.assertRaisesRegex(
+                SystemExit,
+                "must remain outside the reviewed repository",
+            ):
+                self.helper["codex_base_url_setting"](repo)
+
     def test_codex_auth_config_ignores_repo_local_home(self) -> None:
         old = os.environ.copy()
         with tempfile.TemporaryDirectory() as tempdir:
