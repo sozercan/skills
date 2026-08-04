@@ -76,14 +76,20 @@ jobs:
           python -m py_compile `
             skills/autoreview/scripts/autoreview `
             skills/autoreview/scripts/test-review-harness.py `
-            tests/autoreview/test_autoreview.py `
-            tests/autoreview/test_autoreview_hardening.py
+            skills/autoreview/scripts/autoreview_test.py
 
       - name: Run autoreview tests
         shell: pwsh
         run: |
-          python skills/autoreview/scripts/autoreview --self-test
-          python -m unittest discover -s tests/autoreview -p 'test_*.py'
+          python skills/autoreview/scripts/autoreview --self-test-config-defaults
+          python skills/autoreview/scripts/autoreview --self-test-fallback-scope
+          python skills/autoreview/scripts/autoreview --self-test-engine-isolation
+          python skills/autoreview/scripts/autoreview --self-test-heartbeat-metrics
+          python skills/autoreview/scripts/autoreview --self-test-json-array-parser
+          python skills/autoreview/scripts/autoreview --self-test-opencode-jsonl-parser
+          python skills/autoreview/scripts/autoreview --self-test-opencode-isolation
+          python skills/autoreview/scripts/autoreview --self-test-cursor-jsonl-parser
+          python -m unittest skills/autoreview/scripts/autoreview_test.py skills.autoreview.tests.test_autoreview_hardening
 
       - name: Exercise PowerShell harness wrapper
         if: always()

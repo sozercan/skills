@@ -17,13 +17,21 @@ autoreview-lint:
 	$(PYTHON) -m py_compile \
 		skills/autoreview/scripts/autoreview \
 		skills/autoreview/scripts/test-review-harness.py \
-		tests/autoreview/test_autoreview.py \
-		tests/autoreview/test_autoreview_hardening.py
+		skills/autoreview/scripts/autoreview_test.py
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck skills/autoreview/scripts/test-review-harness; else echo "shellcheck not installed; skipping"; fi
 
 autoreview-test: autoreview-lint
-	$(PYTHON) skills/autoreview/scripts/autoreview --self-test
-	$(PYTHON) -m unittest discover -s tests/autoreview -p 'test_*.py'
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-config-defaults
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-fallback-scope
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-engine-isolation
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-heartbeat-metrics
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-json-array-parser
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-opencode-jsonl-parser
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-opencode-isolation
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-cursor-jsonl-parser
+	$(PYTHON) -m unittest \
+		skills/autoreview/scripts/autoreview_test.py \
+		skills.autoreview.tests.test_autoreview_hardening
 
 kindctl-lint:
 	bash -n skills/kindctl/scripts/kindctl
