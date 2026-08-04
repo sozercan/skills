@@ -24,6 +24,7 @@ autoreview-test: autoreview-lint
 	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-config-defaults
 	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-fallback-scope
 	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-engine-isolation
+	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-heartbeat-metrics
 	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-json-array-parser
 	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-opencode-jsonl-parser
 	$(PYTHON) skills/autoreview/scripts/autoreview --self-test-opencode-isolation

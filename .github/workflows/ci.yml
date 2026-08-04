@@ -84,6 +84,7 @@ jobs:
           python skills/autoreview/scripts/autoreview --self-test-config-defaults
           python skills/autoreview/scripts/autoreview --self-test-fallback-scope
           python skills/autoreview/scripts/autoreview --self-test-engine-isolation
+          python skills/autoreview/scripts/autoreview --self-test-heartbeat-metrics
           python skills/autoreview/scripts/autoreview --self-test-json-array-parser
           python skills/autoreview/scripts/autoreview --self-test-opencode-jsonl-parser
           python skills/autoreview/scripts/autoreview --self-test-opencode-isolation
