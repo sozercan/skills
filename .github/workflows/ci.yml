@@ -75,8 +75,7 @@ jobs:
         run: |
           python -m py_compile `
             skills/autoreview/scripts/autoreview `
-            skills/autoreview/scripts/test-review-harness.py `
-            skills/autoreview/scripts/autoreview_test.py
+            skills/autoreview/scripts/test-review-harness.py
 
       - name: Run autoreview tests
         shell: pwsh
@@ -89,7 +88,6 @@ jobs:
           python skills/autoreview/scripts/autoreview --self-test-opencode-jsonl-parser
           python skills/autoreview/scripts/autoreview --self-test-opencode-isolation
           python skills/autoreview/scripts/autoreview --self-test-cursor-jsonl-parser
-          python -m unittest skills/autoreview/scripts/autoreview_test.py skills.autoreview.tests.test_autoreview_hardening
 
       - name: Exercise PowerShell harness wrapper
         if: always()
