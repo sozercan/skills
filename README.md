@@ -10,7 +10,7 @@ skills/
 
 Each skill is self-contained. There are no category folders under `skills/` unless a future skill genuinely needs extra supporting files.
 
-Skills may include runtime support files such as `scripts/`. Locally maintained skills keep non-runtime maintenance files outside the install payload; fully vendored upstream skills may retain their canonical tests and fixtures in place.
+Skills may include runtime support files such as `scripts/`. Non-runtime maintenance artifacts, including repository-only tests and fixtures, stay outside the install payload unless the skill needs them at runtime.
 
 ## Available skills
 
