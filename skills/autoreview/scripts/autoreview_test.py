@@ -507,6 +507,25 @@ def amp_test_mcp_denial_result(
     )
 
 
+class AutoreviewDefaultTests(unittest.TestCase):
+    def test_codex_and_claude_defaults_preserve_downstream_policy(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.object(sys, "argv", ["autoreview"]):
+                codex = AUTOREVIEW.reviewer_args(AUTOREVIEW.parse_args())[0]
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["autoreview", "--engine", "claude"],
+            ):
+                claude = AUTOREVIEW.reviewer_args(AUTOREVIEW.parse_args())[0]
+
+        self.assertEqual(codex.model, "gpt-5.6-sol")
+        self.assertEqual(codex.thinking, "max")
+        self.assertEqual(codex.fallback_model, "gpt-5.6-terra")
+        self.assertEqual(claude.model, "claude-opus-5")
+        self.assertEqual(claude.thinking, "max")
+
+
 class AutoreviewAmpTests(unittest.TestCase):
     def test_amp_bin_cli_option_and_defaults(self) -> None:
         with mock.patch.object(

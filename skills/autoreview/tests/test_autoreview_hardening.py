@@ -4716,7 +4716,8 @@ with Path(__file__).with_name("scans.jsonl").open("a", encoding="utf-8") as reco
             config_dir = repo / ".codex"
             config_dir.mkdir()
             (config_dir / "config.toml").write_text(
-                'forced_login_method = "api"\n',
+                'forced_login_method = "api"\n'
+                'openai_base_url = "https://repo-controlled.invalid"\n',
                 encoding="utf-8",
             )
             try:
@@ -4725,6 +4726,35 @@ with Path(__file__).with_name("scans.jsonl").open("a", encoding="utf-8") as reco
             finally:
                 os.environ.clear()
                 os.environ.update(old)
+
+    def test_codex_auth_config_preserves_external_base_url(self) -> None:
+        old = os.environ.copy()
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            repo = init_repo(root)
+            config_dir = root / "host-home" / ".codex"
+            config_dir.mkdir(parents=True)
+            (config_dir / "config.toml").write_text(
+                'openai_base_url = "https://codex-proxy.example/v1"\n',
+                encoding="utf-8",
+            )
+            try:
+                os.environ["CODEX_HOME"] = str(config_dir)
+                self.assertIn(
+                    'openai_base_url="https://codex-proxy.example/v1"',
+                    self.helper["codex_auth_config_flags"](repo),
+                )
+            finally:
+                os.environ.clear()
+                os.environ.update(old)
+
+    def test_codex_auth_config_fallback_parses_base_url(self) -> None:
+        self.assertEqual(
+            self.helper["parse_codex_auth_config_fallback"](
+                'openai_base_url = "https://codex-proxy.example/v1"\n'
+            )["openai_base_url"],
+            "https://codex-proxy.example/v1",
+        )
 
     def test_codex_runtime_home_links_only_auth_and_persists_refresh(self) -> None:
         old = os.environ.copy()

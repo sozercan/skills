@@ -373,13 +373,14 @@ PROVIDER_CREDENTIAL_PATH_ENV_KEYS = {
 DEFAULT_MODEL_BY_ENGINE = {
     "amp": "openai/gpt-5.6-sol",
     "codex": "gpt-5.6-sol",
-    "claude": "claude-fable-5",
+    "claude": "claude-opus-5",
 }
 DEFAULT_CODEX_ACCESS_FALLBACK_MODEL = "gpt-5.6-terra"
 AMP_THINKING_VALUES = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 DEFAULT_THINKING_BY_ENGINE = {
     "amp": "high",
-    "codex": "high",
+    "codex": "max",
+    "claude": "max",
 }
 THINKING_LEVELS_BY_ENGINE = {
     "amp": set(AMP_THINKING_VALUES),
@@ -3776,7 +3777,7 @@ def parse_codex_auth_config_fallback(text: str) -> dict[str, Any]:
         if line.startswith("["):
             break
         match = re.fullmatch(
-            r"(cli_auth_credentials_store|forced_login_method|forced_chatgpt_workspace_id)\s*=\s*(.+)",
+            r"(cli_auth_credentials_store|forced_login_method|forced_chatgpt_workspace_id|openai_base_url)\s*=\s*(.+)",
             line,
         )
         if not match:
@@ -3835,6 +3836,11 @@ def codex_auth_config_flags(repo: Path, *, force_file: bool = False) -> list[str
     flags: list[str] = (
         ["-c", 'cli_auth_credentials_store="file"'] if force_file else []
     )
+    base_url = config.get("openai_base_url")
+    if isinstance(base_url, str) and base_url:
+        flags.extend(
+            ["-c", f"openai_base_url={json.dumps(base_url, ensure_ascii=False)}"]
+        )
     if not force_file:
         value = config.get("cli_auth_credentials_store")
         if isinstance(value, str) and value in {"file", "keyring", "auto", "ephemeral"}:
@@ -6008,7 +6014,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         action="append",
-        help="Model override or engine=model. Repeatable. Defaults: codex=gpt-5.6-sol with an access-only gpt-5.6-terra retry, claude=claude-fable-5, amp=openai/gpt-5.6-sol.",
+        help="Model override or engine=model. Repeatable. Defaults: codex=gpt-5.6-sol with an access-only gpt-5.6-terra retry, claude=claude-opus-5, amp=openai/gpt-5.6-sol.",
     )
     parser.add_argument("--thinking", action="append", help="Thinking/effort override or engine=level. Repeatable. Codex: none, minimal, low, medium, high, xhigh, max. Claude: low, medium, high, xhigh, max. Amp: none, low, medium, high, xhigh, max. Pi: off, minimal, low, medium, high, xhigh. Kimi: off, on.")
     parser.add_argument(

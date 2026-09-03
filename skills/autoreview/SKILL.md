@@ -81,13 +81,16 @@ parent-relative patch; otherwise leave the attribution unknown.
 
 ## Engines
 
-Codex is the default: `gpt-5.6-sol`, high reasoning, with a `gpt-5.6-terra` retry
-only for an account-access failure. Honor explicit engine/model choices; do not
-switch because a review is slow or rate-limited.
+Codex is the default: `gpt-5.6-sol`, max reasoning, with a `gpt-5.6-terra` retry
+only for an account-access failure. Claude defaults to `claude-opus-5` with max
+reasoning. Honor explicit engine/model choices; do not switch because a review
+is slow or rate-limited.
 
 Use `--engine`, `--model`, and `--thinking` to override the defaults.
 `--codex-speed fast` selects priority service when supported. Only Claude accepts
 `--fallback-model`. Per-engine environment overrides use `AUTOREVIEW_<ENGINE>_*`.
+Isolated Codex runs preserve `openai_base_url` from an external
+`CODEX_HOME/config.toml`; repository-local Codex homes remain ignored.
 
 | Optional engine | Prerequisites                                                                                         |
 | --------------- | ----------------------------------------------------------------------------------------------------- |
