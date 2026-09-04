@@ -81,7 +81,7 @@ parent-relative patch; otherwise leave the attribution unknown.
 
 ## Engines
 
-Codex is the default: `gpt-5.6-sol`, max reasoning, with a `gpt-5.6-terra` retry
+Codex is the default: `gpt-6-astra`, max reasoning, with a `gpt-5.6-terra` retry
 only for an account-access failure. Claude defaults to `claude-opus-5` with max
 reasoning. Honor explicit engine/model choices; do not switch because a review
 is slow or rate-limited.
