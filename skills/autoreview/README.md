@@ -15,7 +15,7 @@ The vendored runtime starts from that snapshot and carries only the behavior ove
 
 - Codex defaults to `gpt-5.6-sol` with `max` reasoning instead of upstream's `high` reasoning.
 - Claude defaults to `claude-opus-5` with `max` reasoning instead of upstream's `claude-fable-5` default.
-- Codex preserves `openai_base_url` from an external `CODEX_HOME/config.toml` and passes it as an explicit override because isolated runs use `--ignore-user-config`.
+- Codex preserves `openai_base_url` from an external `CODEX_HOME/config.toml`, passes it through an internal OpenAI-compatible provider because isolated runs use `--ignore-user-config`, and disables WebSocket transport for that provider.
 
 No other runtime behavior is intentionally changed.
 

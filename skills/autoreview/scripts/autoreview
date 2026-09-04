@@ -3855,8 +3855,27 @@ def codex_auth_config_flags(repo: Path, *, force_file: bool = False) -> list[str
     )
     base_url = config.get("openai_base_url")
     if isinstance(base_url, str) and base_url:
+        # Built-in providers reject capability overrides. Select an isolated
+        # OpenAI-compatible provider so the external endpoint uses HTTP
+        # streaming while retaining OpenAI auth and standalone web search.
+        provider = "autoreview_openai_http"
         flags.extend(
-            ["-c", f"openai_base_url={json.dumps(base_url, ensure_ascii=False)}"]
+            [
+                "-c",
+                f'model_provider="{provider}"',
+                "-c",
+                f'model_providers.{provider}.name="OpenAI"',
+                "-c",
+                f"model_providers.{provider}.base_url={json.dumps(base_url, ensure_ascii=False)}",
+                "-c",
+                f'model_providers.{provider}.wire_api="responses"',
+                "-c",
+                f"model_providers.{provider}.requires_openai_auth=true",
+                "-c",
+                f"model_providers.{provider}.supports_websockets=false",
+                "-c",
+                f"model_providers.{provider}.supports_standalone_web_search=true",
+            ]
         )
     if not force_file:
         value = config.get("cli_auth_credentials_store")
