@@ -1,22 +1,27 @@
 # Autoreview
 
-This directory vendors the OpenClaw `autoreview` skill with three narrow downstream overrides.
+This directory tracks the OpenClaw `autoreview` runtime with three narrow downstream behavior overrides.
 
 ## Upstream
 
 - Repository: [`openclaw/agent-skills`](https://github.com/openclaw/agent-skills)
-- Source snapshot: [`skills/autoreview` at commit `2a409d348a4bcf6f15e41e9a20efd0b298a32528`](https://github.com/openclaw/agent-skills/tree/2a409d348a4bcf6f15e41e9a20efd0b298a32528/skills/autoreview)
-- Commit: [`2a409d348a4bcf6f15e41e9a20efd0b298a32528`](https://github.com/openclaw/agent-skills/commit/2a409d348a4bcf6f15e41e9a20efd0b298a32528) (`docs(skills): add readme-standard house README skill`, August 2, 2026)
+- Source snapshot: [`skills/autoreview` at commit `3f392d7531673127ebfa9ed87148e64c26c8153f`](https://github.com/openclaw/agent-skills/tree/3f392d7531673127ebfa9ed87148e64c26c8153f/skills/autoreview)
+- Commit: [`3f392d7531673127ebfa9ed87148e64c26c8153f`](https://github.com/openclaw/agent-skills/commit/3f392d7531673127ebfa9ed87148e64c26c8153f)
 
-The vendored skill matches that snapshot except for the three overrides below and this provenance README.
+The vendored runtime starts from that snapshot and carries only the behavior overrides below.
+`AGENTS.md` records the downstream sync policy.
 
 ## Local differences
 
 - Codex defaults to `gpt-5.6-sol` with `max` reasoning instead of upstream's `high` reasoning.
 - Claude defaults to `claude-opus-5` with `max` reasoning instead of upstream's `claude-fable-5` default.
-- Codex runs with `--ignore-user-config`, so the downstream copy also preserves `openai_base_url` from the external `CODEX_HOME/config.toml` and passes it as an explicit Codex configuration override.
+- Codex preserves `openai_base_url` from an external `CODEX_HOME/config.toml` and passes it as an explicit override because isolated runs use `--ignore-user-config`.
 
-`SKILL.md` documents all three exceptions. No other skill behavior is intentionally changed.
+No other runtime behavior is intentionally changed.
+
+## Packaging
+
+The upstream test suites, fixtures, and optional `scripts/test-review-harness*` live-provider smoke wrappers are omitted. `scripts/autoreview` does not depend on them. A small downstream test covers only the three local behavior overrides.
 
 ## Upstream license
 
