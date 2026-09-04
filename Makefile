@@ -13,10 +13,13 @@ test: autoreview-test kindctl-test
 test-integration: kindctl-test-integration
 
 autoreview-lint:
-	$(PYTHON) -m py_compile skills/autoreview/scripts/autoreview
+	$(PYTHON) -m py_compile \
+		skills/autoreview/scripts/autoreview \
+		skills/autoreview/tests/test_downstream_overrides.py
 
 autoreview-test: autoreview-lint
 	$(PYTHON) skills/autoreview/scripts/autoreview --help >/dev/null
+	$(PYTHON) -m unittest skills/autoreview/tests/test_downstream_overrides.py
 
 kindctl-lint:
 	bash -n skills/kindctl/scripts/kindctl

@@ -5,8 +5,8 @@ This directory tracks the OpenClaw `autoreview` runtime with three narrow downst
 ## Upstream
 
 - Repository: [`openclaw/agent-skills`](https://github.com/openclaw/agent-skills)
-- Source snapshot: [`skills/autoreview` at commit `0cdce5469d49509265333a0ef88e80a574ff8fb6`](https://github.com/openclaw/agent-skills/tree/0cdce5469d49509265333a0ef88e80a574ff8fb6/skills/autoreview)
-- Commit: [`0cdce5469d49509265333a0ef88e80a574ff8fb6`](https://github.com/openclaw/agent-skills/commit/0cdce5469d49509265333a0ef88e80a574ff8fb6)
+- Source snapshot: [`skills/autoreview` at commit `3f392d7531673127ebfa9ed87148e64c26c8153f`](https://github.com/openclaw/agent-skills/tree/3f392d7531673127ebfa9ed87148e64c26c8153f/skills/autoreview)
+- Commit: [`3f392d7531673127ebfa9ed87148e64c26c8153f`](https://github.com/openclaw/agent-skills/commit/3f392d7531673127ebfa9ed87148e64c26c8153f)
 
 The vendored runtime starts from that snapshot and carries only the behavior overrides below.
 `AGENTS.md` records the downstream sync policy.
@@ -21,7 +21,7 @@ No other runtime behavior is intentionally changed.
 
 ## Packaging
 
-The optional `scripts/test-review-harness*` live-provider smoke wrappers and their wrapper-only upstream test are omitted. `scripts/autoreview` does not depend on them.
+The upstream test suites, fixtures, and optional `scripts/test-review-harness*` live-provider smoke wrappers are omitted. `scripts/autoreview` does not depend on them. A small downstream test covers only the three local behavior overrides.
 
 ## Upstream license
 
