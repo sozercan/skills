@@ -1439,11 +1439,6 @@ with Path(__file__).with_name("scans.jsonl").open("a", encoding="utf-8") as reco
 
             self.assertIn(self.helper["REVIEW_SECURITY_OMISSION"], bundle)
 
-    def test_powershell_harness_exposes_runnable_engines_only(self) -> None:
-        harness = SCRIPT.with_name("test-review-harness.ps1").read_text(encoding="utf-8")
-
-        self.assertIn("[ValidateSet('codex', 'claude', 'amp', 'pi', 'kimi')]", harness)
-
     def test_local_bundle_omits_sensitive_untracked_file_without_blocking(self) -> None:
         for rel in (".env", "tokens/session.dat", "secrets/local.py"):
             with self.subTest(rel=rel), tempfile.TemporaryDirectory() as tempdir:

@@ -13,15 +13,10 @@ test: autoreview-test kindctl-test
 test-integration: kindctl-test-integration
 
 autoreview-lint:
-	bash -n skills/autoreview/scripts/test-review-harness
-	$(PYTHON) -m py_compile \
-		skills/autoreview/scripts/autoreview \
-		skills/autoreview/scripts/test-review-harness.py
-	@if command -v shellcheck >/dev/null 2>&1; then shellcheck skills/autoreview/scripts/test-review-harness; else echo "shellcheck not installed; skipping"; fi
+	$(PYTHON) -m py_compile skills/autoreview/scripts/autoreview
 
 autoreview-test: autoreview-lint
 	$(PYTHON) skills/autoreview/scripts/autoreview --help >/dev/null
-	$(PYTHON) skills/autoreview/scripts/test-review-harness.py --help >/dev/null
 
 kindctl-lint:
 	bash -n skills/kindctl/scripts/kindctl

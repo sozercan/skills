@@ -1,6 +1,6 @@
 # Autoreview
 
-This directory tracks the OpenClaw `autoreview` skill with three narrow downstream overrides.
+This directory tracks the OpenClaw `autoreview` runtime with three narrow downstream behavior overrides.
 
 ## Upstream
 
@@ -8,7 +8,7 @@ This directory tracks the OpenClaw `autoreview` skill with three narrow downstre
 - Source snapshot: [`skills/autoreview` at commit `0cdce5469d49509265333a0ef88e80a574ff8fb6`](https://github.com/openclaw/agent-skills/tree/0cdce5469d49509265333a0ef88e80a574ff8fb6/skills/autoreview)
 - Commit: [`0cdce5469d49509265333a0ef88e80a574ff8fb6`](https://github.com/openclaw/agent-skills/commit/0cdce5469d49509265333a0ef88e80a574ff8fb6)
 
-The vendored runtime starts from that snapshot and carries only the overrides below.
+The vendored runtime starts from that snapshot and carries only the behavior overrides below.
 `AGENTS.md` records the downstream sync policy.
 
 ## Local differences
@@ -17,7 +17,11 @@ The vendored runtime starts from that snapshot and carries only the overrides be
 - Claude defaults to `claude-opus-5` with `max` reasoning instead of upstream's `claude-fable-5` default.
 - Codex preserves `openai_base_url` from an external `CODEX_HOME/config.toml` and passes it as an explicit override because isolated runs use `--ignore-user-config`.
 
-No other behavior is intentionally changed.
+No other runtime behavior is intentionally changed.
+
+## Packaging
+
+The optional `scripts/test-review-harness*` live-provider smoke wrappers and their wrapper-only upstream test are omitted. `scripts/autoreview` does not depend on them.
 
 ## Upstream license
 
