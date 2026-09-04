@@ -33,7 +33,7 @@ class DownstreamOverrideTests(unittest.TestCase):
         self.assertEqual((codex.model, codex.thinking), ("gpt-5.6-sol", "max"))
         self.assertEqual((claude.model, claude.thinking), ("claude-opus-5", "max"))
 
-    def test_only_external_codex_base_url_is_forwarded(self) -> None:
+    def test_only_external_codex_base_url_uses_http_provider(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
             repo = root / "repo"
@@ -48,9 +48,24 @@ class DownstreamOverrideTests(unittest.TestCase):
             with mock.patch.dict(
                 os.environ, {"CODEX_HOME": str(external_home)}, clear=True
             ):
-                self.assertIn(
-                    'openai_base_url="https://codex-proxy.example/v1"',
+                self.assertEqual(
                     AUTOREVIEW.codex_auth_config_flags(repo),
+                    [
+                        "-c",
+                        'model_provider="autoreview_openai_http"',
+                        "-c",
+                        'model_providers.autoreview_openai_http.name="OpenAI"',
+                        "-c",
+                        'model_providers.autoreview_openai_http.base_url="https://codex-proxy.example/v1"',
+                        "-c",
+                        'model_providers.autoreview_openai_http.wire_api="responses"',
+                        "-c",
+                        "model_providers.autoreview_openai_http.requires_openai_auth=true",
+                        "-c",
+                        "model_providers.autoreview_openai_http.supports_websockets=false",
+                        "-c",
+                        "model_providers.autoreview_openai_http.supports_standalone_web_search=true",
+                    ],
                 )
 
             repo_home = repo / ".codex"

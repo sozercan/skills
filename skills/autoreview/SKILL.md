@@ -90,7 +90,8 @@ Use `--engine`, `--model`, and `--thinking` to override the defaults.
 `--codex-speed fast` selects priority service when supported. Only Claude accepts
 `--fallback-model`. Per-engine environment overrides use `AUTOREVIEW_<ENGINE>_*`.
 Isolated Codex runs preserve `openai_base_url` from an external
-`CODEX_HOME/config.toml`; repository-local Codex homes remain ignored.
+`CODEX_HOME/config.toml` and disable WebSocket transport for that provider;
+repository-local Codex homes remain ignored.
 
 | Optional engine | Prerequisites                                                                                         |
 | --------------- | ----------------------------------------------------------------------------------------------------- |
