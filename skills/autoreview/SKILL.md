@@ -35,7 +35,6 @@ installed with `--target`. On Windows, invoke the helper with Python 3.10 or new
 or use the adjacent `autoreview.ps1` launcher.
 Use `--help` for the complete flags and environment overrides.
 
-Repositories keep only the [shared-skill entrypoint](references/repository-entrypoint.md).
 Read this full skill and its required references from the shared installation.
 Keep repository-specific thresholds and review requirements in the consumer's
 instructions. Upstream changes to shared behavior here.

@@ -16,6 +16,7 @@ The vendored runtime starts from that snapshot and carries only the behavior ove
 - Codex defaults to `gpt-6.1-sol` with `xhigh` reasoning instead of upstream's `high` reasoning.
 - Claude defaults to `claude-opus-5-5` with `xhigh` reasoning instead of upstream's `claude-fable-5` default.
 - Codex preserves `openai_base_url` from an external `CODEX_HOME/config.toml`, passes it through an internal OpenAI-compatible provider because isolated runs use `--ignore-user-config`, and disables WebSocket transport for that provider.
+- `references/repository-entrypoint.md` is omitted; it is a template for repositories that consume the shared install, and this directory vendors the runtime.
 
 No other runtime behavior is intentionally changed.
 
