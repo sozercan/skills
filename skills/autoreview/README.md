@@ -5,15 +5,15 @@ This directory tracks the OpenClaw `autoreview` runtime with three narrow downst
 ## Upstream
 
 - Repository: [`openclaw/agent-skills`](https://github.com/openclaw/agent-skills)
-- Source snapshot: [`skills/autoreview` at commit `3f392d7531673127ebfa9ed87148e64c26c8153f`](https://github.com/openclaw/agent-skills/tree/3f392d7531673127ebfa9ed87148e64c26c8153f/skills/autoreview)
-- Commit: [`3f392d7531673127ebfa9ed87148e64c26c8153f`](https://github.com/openclaw/agent-skills/commit/3f392d7531673127ebfa9ed87148e64c26c8153f)
+- Source snapshot: [`skills/autoreview` at commit `bae9b204f937991b45c3fd68d5c9dcafb23b9159`](https://github.com/openclaw/agent-skills/tree/bae9b204f937991b45c3fd68d5c9dcafb23b9159/skills/autoreview)
+- Commit: [`bae9b204f937991b45c3fd68d5c9dcafb23b9159`](https://github.com/openclaw/agent-skills/commit/bae9b204f937991b45c3fd68d5c9dcafb23b9159)
 
 The vendored runtime starts from that snapshot and carries only the behavior overrides below.
 `AGENTS.md` records the downstream sync policy.
 
 ## Local differences
 
-- Codex defaults to `gpt-6.1-sol` with `xhigh` reasoning instead of upstream's `gpt-5.6-sol` with `high` reasoning.
+- Codex defaults to `gpt-6.1-sol` with `xhigh` reasoning instead of upstream's `high` reasoning.
 - Claude defaults to `claude-opus-5-5` with `xhigh` reasoning instead of upstream's `claude-fable-5` default.
 - Codex preserves `openai_base_url` from an external `CODEX_HOME/config.toml`, passes it through an internal OpenAI-compatible provider because isolated runs use `--ignore-user-config`, and disables WebSocket transport for that provider.
 
