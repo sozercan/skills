@@ -42,6 +42,17 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install shellcheck
 
+      - name: Install demo video tools on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y ffmpeg python3-pil python3-numpy
+
+      - name: Install demo video tools on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install ffmpeg agg
+          python3 -m pip install --user --break-system-packages pillow numpy
+
       - name: Show tool versions
         run: |
           bash --version | head -n 1

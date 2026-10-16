@@ -4,11 +4,12 @@ TEST_PATTERN ?=
 
 .PHONY: lint test test-integration \
 	autoreview-lint autoreview-test \
+	demo-video-lint demo-video-test \
 	kindctl-lint kindctl-test kindctl-test-integration
 
-lint: autoreview-lint kindctl-lint
+lint: autoreview-lint kindctl-lint demo-video-lint
 
-test: autoreview-test kindctl-test
+test: autoreview-test kindctl-test demo-video-test
 
 test-integration: kindctl-test-integration
 
@@ -20,6 +21,21 @@ autoreview-lint:
 autoreview-test: autoreview-lint
 	$(PYTHON) skills/autoreview/scripts/autoreview --help >/dev/null
 	$(PYTHON) -m unittest skills/autoreview/tests/test_downstream_overrides.py
+
+demo-video-lint:
+	$(PYTHON) -m py_compile \
+		skills/local-tts-narration/scripts/narrate.py \
+		skills/terminal-demo-video/scripts/cast.py \
+		skills/terminal-demo-video/scripts/build_video.py \
+		skills/terminal-demo-video/scripts/verify_video.py
+	$(PYTHON) skills/local-tts-narration/scripts/narrate.py --help >/dev/null
+	$(PYTHON) skills/terminal-demo-video/scripts/cast.py --help >/dev/null
+
+# Tests skip themselves when ffmpeg, agg or Pillow are missing.
+demo-video-test: demo-video-lint
+	$(PYTHON) -m unittest \
+		tests/local-tts-narration/test_narrate.py \
+		tests/terminal-demo-video/test_terminal_demo_video.py
 
 kindctl-lint:
 	bash -n skills/kindctl/scripts/kindctl

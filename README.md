@@ -18,6 +18,8 @@ Skills may include runtime support files such as `scripts/`. Locally maintained 
 | --- | --- |
 | [`a365-cli`](skills/a365-cli/SKILL.md) | Safe user-facing operation of the `a365` CLI for Microsoft 365 through agent365 MCP servers. |
 | [`autoreview`](skills/autoreview/SKILL.md) | Structured closeout code review minimally adapted from OpenClaw. Defaults to Codex `gpt-6.1-sol` and Claude `claude-opus-5-5`, both with `xhigh` reasoning. |
+| [`local-tts-narration`](skills/local-tts-narration/SKILL.md) | Generate, normalize, and check voiceover clips locally from a reference voice with a Qwen3-TTS (AIKit/LocalAI) endpoint. |
+| [`terminal-demo-video`](skills/terminal-demo-video/SKILL.md) | Record a terminal demo with asciinema and build a narrated 1080p MP4 with ffmpeg; pairs with `local-tts-narration`. |
 | [`kusto-cli`](skills/kusto-cli/SKILL.md) | Safe user-facing operation of `kusto-cli` for Azure Data Explorer/Kusto terminal work. |
 | [`kindctl`](skills/kindctl/SKILL.md) | Repo/worktree-scoped kind cluster management. Installs only the skill docs and runtime `scripts/kindctl`; tests and templates stay outside the skill payload. |
 
@@ -42,6 +44,8 @@ npx skills@latest add sozercan/skills --skill a365-cli -y
 npx skills@latest add sozercan/skills --skill autoreview -y
 npx skills@latest add sozercan/skills --skill kindctl -y
 npx skills@latest add sozercan/skills --skill kusto-cli -y
+npx skills@latest add sozercan/skills --skill local-tts-narration -y
+npx skills@latest add sozercan/skills --skill terminal-demo-video -y
 ```
 
 Add `--global` to install globally instead of project-locally, or `--agent <name>` to target a specific supported agent.
