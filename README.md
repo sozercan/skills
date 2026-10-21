@@ -19,6 +19,7 @@ Skills may include runtime support files such as `scripts/`. Locally maintained 
 | [`a365-cli`](skills/a365-cli/SKILL.md) | Safe user-facing operation of the `a365` CLI for Microsoft 365 through agent365 MCP servers. |
 | [`autoreview`](skills/autoreview/SKILL.md) | Structured closeout code review minimally adapted from OpenClaw. Defaults to Codex `gpt-6.1-sol` and Claude `claude-opus-5-5`, both with `xhigh` reasoning. |
 | [`kusto-cli`](skills/kusto-cli/SKILL.md) | Safe user-facing operation of `kusto-cli` for Azure Data Explorer/Kusto terminal work. |
+| [`pr-closeout`](skills/pr-closeout/SKILL.md) | Drive a GitHub PR to merge-ready: resolve conflicts, fix CI, and address or push back on review threads. Bundles a read-only `scripts/pr_snapshot.sh` state helper. |
 | [`kindctl`](skills/kindctl/SKILL.md) | Repo/worktree-scoped kind cluster management. Installs only the skill docs and runtime `scripts/kindctl`; tests and templates stay outside the skill payload. |
 
 ## Install
@@ -42,6 +43,7 @@ npx skills@latest add sozercan/skills --skill a365-cli -y
 npx skills@latest add sozercan/skills --skill autoreview -y
 npx skills@latest add sozercan/skills --skill kindctl -y
 npx skills@latest add sozercan/skills --skill kusto-cli -y
+npx skills@latest add sozercan/skills --skill pr-closeout -y
 ```
 
 Add `--global` to install globally instead of project-locally, or `--agent <name>` to target a specific supported agent.

@@ -4,9 +4,10 @@ TEST_PATTERN ?=
 
 .PHONY: lint test test-integration \
 	autoreview-lint autoreview-test \
-	kindctl-lint kindctl-test kindctl-test-integration
+	kindctl-lint kindctl-test kindctl-test-integration \
+	pr-closeout-lint
 
-lint: autoreview-lint kindctl-lint
+lint: autoreview-lint kindctl-lint pr-closeout-lint
 
 test: autoreview-test kindctl-test
 
@@ -33,3 +34,7 @@ kindctl-test:
 
 kindctl-test-integration:
 	tests/kindctl/run-integration.sh
+
+pr-closeout-lint:
+	bash -n skills/pr-closeout/scripts/pr_snapshot.sh
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck skills/pr-closeout/scripts/pr_snapshot.sh; else echo "shellcheck not installed; skipping"; fi
