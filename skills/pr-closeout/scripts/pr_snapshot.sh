@@ -107,8 +107,10 @@ else
 fi
 
 resolved_pr_url="$(jq -r '.url // ""' <<<"$pr_json")"
-if [[ "$resolved_pr_url" =~ ^https?://[^/]+/([^/]+)/([^/]+)/pull/[0-9]+ ]]; then
-  github_repo="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+if [[ "$resolved_pr_url" =~ ^https?://([^/]+)/([^/]+)/([^/]+)/pull/[0-9]+ ]]; then
+  # Keep later gh api / gh pr checks calls on the PR's host (e.g. GitHub Enterprise).
+  export GH_HOST="${BASH_REMATCH[1]}"
+  github_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]}"
   owner="${github_repo%%/*}"
   repo="${github_repo#*/}"
 fi
