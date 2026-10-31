@@ -196,7 +196,7 @@ GPT-6 Astra without a model fallback, select it explicitly:
 GPT-6.1 Sol and GPT-6 Astra support `low`, `medium`, `high`, `xhigh`, and `max`;
 neither supports `none` or `minimal`. GPT-6 Sol and Luna additionally support `none`,
 but not `minimal`. AutoReview defaults to
-`high` and does not fall back from an explicit Luna or Astra selection.
+`xhigh` and does not fall back from an explicit Luna or Astra selection.
 Codex's `ultra` mode uses automatic
 delegation and is outside this helper's supported effort levels. Use `max`
 for its deepest supported review. For EU data residency, use
