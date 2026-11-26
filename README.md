@@ -17,7 +17,7 @@ Skills may include runtime support files such as `scripts/`. Locally maintained 
 | Skill | Purpose |
 | --- | --- |
 | [`a365-cli`](skills/a365-cli/SKILL.md) | Safe user-facing operation of the `a365` CLI for Microsoft 365 through agent365 MCP servers. |
-| [`autoreview`](skills/autoreview/SKILL.md) | Structured closeout code review minimally adapted from OpenClaw. Defaults to Codex `gpt-6.1-sol` and Claude `claude-opus-5-5`, both with `xhigh` reasoning. |
+| [`autoreview`](skills/autoreview/SKILL.md) | Structured closeout code review minimally adapted from OpenClaw. Defaults to Codex `gpt-6.2-sol` (with `gpt-6.1-sol` fallback) and optional Claude `claude-opus-5-5`, both with `high` reasoning. |
 | [`kusto-cli`](skills/kusto-cli/SKILL.md) | Safe user-facing operation of `kusto-cli` for Azure Data Explorer/Kusto terminal work. |
 | [`pr-closeout`](skills/pr-closeout/SKILL.md) | Drive a GitHub PR to merge-ready: resolve conflicts, fix CI, and address or push back on review threads. Bundles a read-only `scripts/pr_snapshot.sh` state helper. |
 | [`kindctl`](skills/kindctl/SKILL.md) | Repo/worktree-scoped kind cluster management. Installs only the skill docs and runtime `scripts/kindctl`; tests and templates stay outside the skill payload. |
