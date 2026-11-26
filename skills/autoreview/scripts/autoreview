@@ -442,6 +442,7 @@ DEFAULT_MODEL_BY_ENGINE = {
     "claude": "claude-opus-5-5",
 }
 DEFAULT_CODEX_ACCESS_FALLBACK_MODEL = "gpt-6.1-sol"
+DOWNSTREAM_OPENAI_HTTP_PROVIDER = "autoreview_openai_http"
 AMP_THINKING_VALUES = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 DEFAULT_THINKING_BY_ENGINE = {
     "amp": "high",
@@ -5285,7 +5286,7 @@ def codex_auth_config_flags(
         # Built-in providers reject capability overrides. Select an isolated
         # OpenAI-compatible provider so the external endpoint uses HTTP
         # streaming while retaining OpenAI auth and standalone web search.
-        provider = "autoreview_openai_http"
+        provider = DOWNSTREAM_OPENAI_HTTP_PROVIDER
         flags.extend(
             [
                 "-c",
@@ -5293,7 +5294,7 @@ def codex_auth_config_flags(
                 "-c",
                 f'model_providers.{provider}.name="OpenAI"',
                 "-c",
-                f"model_providers.{provider}.base_url={json.dumps(base_url, ensure_ascii=False)}",
+                f"model_providers.{provider}.base_url={toml_string(base_url)}",
                 "-c",
                 f'model_providers.{provider}.wire_api="responses"',
                 "-c",
@@ -6379,7 +6380,11 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
             )
             runtime_root = Path(runtime_dir)
             runtime_codex_home = runtime_root / "codex-home"
-            command_auth = any(flag.startswith("model_provider=") for flag in route[0])
+            command_auth = any(
+                flag.startswith("model_provider=")
+                and flag != f'model_provider="{DOWNSTREAM_OPENAI_HTTP_PROVIDER}"'
+                for flag in route[0]
+            )
             auth_fallback = (
                 load_codex_auth_fallback_route(repo, overrides, command_auth=command_auth)
                 if allow_fallback and not command_auth else None

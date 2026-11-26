@@ -15,7 +15,7 @@ The vendored runtime starts from that snapshot and carries only the behavior ove
 
 - Codex defaults to `gpt-6.2-sol` with `high` reasoning (with access-only fallback to `gpt-6.1-sol`) instead of upstream's `gpt-6.1-sol` at `medium` reasoning.
 - Claude defaults to `claude-opus-5-5` with `high` reasoning (used only when explicitly requested or Codex is unavailable) instead of upstream's `claude-fable-5` default.
-- Codex preserves `openai_base_url` from an external `CODEX_HOME/config.toml`, passes it through an internal OpenAI-compatible provider because isolated runs use `--ignore-user-config`, and disables WebSocket transport for that provider.
+- Codex preserves `openai_base_url` from an external `CODEX_HOME/config.toml`, passes it through an internal OpenAI-compatible provider (`autoreview_openai_http`) with WebSocket transport disabled because isolated runs use `--ignore-user-config`, and excludes that internal provider from upstream's `command_auth` detection in `run_codex` so normal `auth.json`/keyring credentials and diagnostics remain intact.
 - Non-generic upstream docs (`references/repository-entrypoint.md`, `references/openclaw.md`, and OpenClaw/ClawSweeper-specific sections in `SKILL.md` and `references/`) are omitted.
 
 No other runtime behavior is intentionally changed.

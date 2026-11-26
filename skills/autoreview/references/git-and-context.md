@@ -171,8 +171,7 @@ First run the ordinary branch `--dry-run` to obtain `bundle identity` (resolved
 merge-base, HEAD, SHA-256 of the exact captured bundle). Keep the same `--base`
 argument: its label is part of those bytes. Declare each source context's exact
 HEAD blob and mode from Git. Store the operator manifest in an ignored directory
-inside the reviewed repository, so a preflight export can still require a clean
-branch. The helper rejects symlinked/unsafe inputs and revalidates manifest bytes
+inside the reviewed repository to keep the branch working tree clean. The helper rejects symlinked/unsafe inputs and revalidates manifest bytes
 and path identity before every send and before publishing the aggregate.
 
 ```json
