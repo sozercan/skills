@@ -30,8 +30,11 @@ class DownstreamOverrideTests(unittest.TestCase):
         codex = self.reviewer_for()
         claude = self.reviewer_for("--engine", "claude")
 
-        self.assertEqual((codex.model, codex.thinking), ("gpt-6.1-sol", "xhigh"))
-        self.assertEqual((claude.model, claude.thinking), ("claude-opus-5-5", "xhigh"))
+        self.assertEqual(
+            (codex.model, codex.fallback_model, codex.thinking),
+            ("gpt-6.2-sol", "gpt-6.1-sol", "high"),
+        )
+        self.assertEqual((claude.model, claude.thinking), ("claude-opus-5-5", "high"))
 
     def test_only_external_codex_base_url_uses_http_provider(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
