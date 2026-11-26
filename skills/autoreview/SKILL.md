@@ -19,21 +19,16 @@ AUTOREVIEW="$HOME/.agents/skills/autoreview/scripts/autoreview"
 python3 "$AUTOREVIEW" --mode local
 ```
 
-Install from the canonical checkout: `python3 scripts/install-skills autoreview`.
-The default links to this source. Honor custom `--target` paths; here use
-`skills/autoreview/scripts/autoreview`. Windows needs Python 3.10+ or `autoreview.ps1`.
+Windows needs Python 3.10+ or `autoreview.ps1`.
 See `--help` for flags/env overrides. Keep `codex exec`: native `codex review`
 cannot combine explicit Git targets and custom instructions.
 
 `python3 "$AUTOREVIEW" --version` prints `autoreview source-sha256:<64 hex digits>`
-for the executing helper's bytes, including copy-mode installations. It exits
-without Git, configuration, engine probes or report writes. This identifies the
-helper content, not a release, the complete skill or an attestation.
+for the executing helper's bytes. It exits without Git, configuration, engine
+probes or report writes. This identifies the helper content, not a release, the
+complete skill or an attestation.
 
-Update shared behavior here after active reviews finish.
-Copy-mode installs need
-`scripts/install-skills --mode copy --force autoreview` after source updates;
-review commands never download or update themselves.
+Review commands never download or update themselves.
 
 Choose the target explicitly when ambiguous:
 
@@ -189,8 +184,7 @@ harmless placeholders and fixtures are not credentials.
 ### Intentional scanner-free policy
 
 Autoreview does not invoke an external secret scanner. Keep approved scanning
-outside it: reviewer findings occur after transmission. Adding a scanner requires
-an explicit maintainer decision; see [#240](https://github.com/openclaw/agent-skills/pull/240).
+outside it: reviewer findings occur after transmission.
 
 ### Reviewer isolation
 
@@ -235,15 +229,6 @@ Keep `--output`, `--json-output`, and `--status-output` outside the repo, includ
 resolved parent entries/referents. Use distinct destinations and a fresh status path.
 For path aliases, machine status, usage, or local stage observation, read
 [diagnostic details](references/diagnostics-and-results.md).
-
-For an optional shareable summary of a clean committed branch, add
-`--preflight-output /outside/repo/preflight.txt --preflight-repo owner/repository`
-to `--mode branch --base <ref>`. Name the intended PR target explicitly, including
-when reviewing a fork. The helper writes one bounded advisory comment without
-GitHub access or another review. Native reports, status, and exit codes stay unchanged.
-Local/commit targets, dirty trees, empty ranges, and dry runs cannot export this
-committed-range summary. Read [summary limits](references/diagnostics-and-results.md#preflight-summary)
-before sharing; it is self-reported, not trusted execution or review exemption.
 
 | Exit | Meaning |
 | --- | --- |
